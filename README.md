@@ -156,6 +156,88 @@ surface: `WAVO_MCP_COMMAND` (default `demix-mcp`) and `TELEGRAM_API_BASE`
 when the MCP child is alive and plainsong answered within the last minute, and
 `503` otherwise. It is the container health check; no port is published for it.
 
+## on a Linux VPS
+
+On a server that already has Docker and the compose plugin, the deployment is
+the quick start plus a public name for plainsong:
+
+```sh
+git clone https://github.com/pwittchen/wavo.git
+cd wavo
+cp .env.example .env
+$EDITOR .env                   # tokens, chat IDs, PLAINSONG_PUBLIC_URL
+docker compose up -d --build   # the first build takes 10–20 minutes
+docker compose ps              # both services should end up (healthy)
+docker compose logs -f wavo
+```
+
+`restart: unless-stopped` is the whole supervision story — as long as
+`docker.service` is enabled, both containers come back after a reboot, and
+there is no systemd unit to write. The bot needs no inbound port; Telegram is
+long-polled outbound.
+
+Pick an **amd64** machine: spleeter's TensorFlow wheels exist for `linux/amd64`
+only, so an arm64 VPS can run the image only under emulation, which is too slow
+to be useful. Two cores, 4 GB of RAM and 20 GB of disk is a comfortable floor —
+the image is 2–3 GB, the spleeter models another ~300 MB in the `wavo-work`
+volume, and separating a normal-length song peaks around 2 GB of RAM.
+
+### a public name for plainsong
+
+Compose publishes plainsong on `127.0.0.1:8080` only, so the links wavo sends
+are useless until something on the host terminates TLS in front of it — a Caddy
+site block is enough:
+
+```
+music.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+Then point wavo at that name, or every link it sends will say `127.0.0.1`:
+
+```sh
+$EDITOR .env                   # PLAINSONG_PUBLIC_URL=https://music.example.com
+docker compose up -d           # recreates wavo with the new value
+```
+
+### upgrades and backups
+
+```sh
+git pull
+docker compose pull            # plainsong, from ghcr.io
+docker compose up -d --build   # wavo, from the checkout
+docker image prune -f
+```
+
+`wavo_plainsong-data` holds the collection and is the only volume worth backing
+up; `wavo_wavo-work` is job scratch plus the model cache, and throwing it away
+costs one re-download of the models.
+
+```sh
+docker run --rm -v wavo_plainsong-data:/data -v "$PWD:/backup" busybox \
+  tar czf /backup/plainsong-$(date +%F).tar.gz -C /data .
+```
+
+### when YouTube gets suspicious
+
+Datacenter IP ranges are the ones YouTube asks to *"sign in to confirm you're
+not a bot"*, so a download that works at home can fail on a VPS. Export cookies
+from a browser where you are signed in and hand the file to yt-dlp through a
+git-ignored `docker-compose.override.yml`:
+
+```yaml
+services:
+  wavo:
+    volumes:
+      - ./cookies.txt:/work/cookies.txt:ro
+    environment:
+      DEMIX_YT_DLP_ARGS: --cookies /work/cookies.txt
+```
+
+The container runs as uid 10001, so the file has to be readable by it
+(`chmod 644 cookies.txt`).
+
 ## development
 
 ```sh
