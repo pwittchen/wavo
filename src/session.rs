@@ -142,6 +142,21 @@ impl Sessions {
         }
     }
 
+    /// Whether this chat has already discussed a song, which is what lets a bare
+    /// follow-up ("zwolnij do 80%") count as a whole request (§5.6).
+    pub async fn has_song_context(&self, chat_id: i64) -> bool {
+        self.inner
+            .read()
+            .await
+            .get(&chat_id)
+            .is_some_and(|session| {
+                session
+                    .messages
+                    .iter()
+                    .any(|message| message.role == Role::User)
+            })
+    }
+
     pub async fn busy_here(&self, chat_id: i64) -> bool {
         self.inner
             .read()

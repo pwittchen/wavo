@@ -28,7 +28,7 @@ use crate::mcp::{schema, McpClient};
 use crate::session::PublishedTrack;
 use crate::telegram::format::{t, t_detail, t_n, t_name, truncate_middle, Lang, Msg};
 use crate::tools::plainsong::{is_audio_file, PlainsongClient};
-use crate::tools::publish::resolve_publish_path;
+use crate::tools::publish::{compose_track_title, resolve_publish_path};
 
 /// Everything one turn accumulates: the paths the model is allowed to name, the
 /// tracks it published, and the directories to clean up afterwards.
@@ -141,7 +141,9 @@ impl Tools {
         catalogue.push(ToolDef::new(
             "publish_track",
             "Publish a processed audio file to the music storage and get its link. \
-             `path` must be one of the paths listed in a previous tool result.",
+             `path` must be one of the paths listed in a previous tool result. The \
+             three title parts are joined by wavo into \"Artist — Title (modification)\"; \
+             do not join them yourself.",
             json!({
                 "type": "object",
                 "properties": {
@@ -149,12 +151,24 @@ impl Tools {
                         "type": "string",
                         "description": "A path exactly as it appeared in a previous tool result's `files` list."
                     },
+                    "artist": {
+                        "type": "string",
+                        "description": "The performer alone, as written, never translated, e.g. \"Queen\"."
+                    },
                     "title": {
                         "type": "string",
-                        "description": "Human-readable title, e.g. \"Bohemian Rhapsody — vocals (0.8x)\"."
+                        "description": "The song title alone, without the artist and without what was done to it, e.g. \"Bohemian Rhapsody\"."
+                    },
+                    "modification": {
+                        "type": "string",
+                        "description": "What was done to this file, in the language of the user's most recent message: \
+                                        \"vocals removed\" / \"bez wokalu\", \"instrumental\" / \"podkład\", \
+                                        \"slowed down to 80%\" / \"zwolnione do 80%\", \"transposed to A minor\" / \
+                                        \"tonacja a-moll\". If nothing was changed, say so in that language \
+                                        (\"original\" / \"oryginał\")."
                     }
                 },
-                "required": ["path", "title"]
+                "required": ["path", "artist", "title", "modification"]
             }),
         ));
 
@@ -350,12 +364,17 @@ impl Tools {
     }
 
     async fn publish_track(&self, ctx: &TurnCtx, arguments: &Value) -> Value {
-        let (Some(path), title) = (
-            arguments.get("path").and_then(Value::as_str),
-            arguments.get("title").and_then(Value::as_str).unwrap_or(""),
-        ) else {
+        let Some(path) = arguments.get("path").and_then(Value::as_str) else {
             return error("`path` is required".to_string());
         };
+        let part = |key: &str| {
+            arguments
+                .get(key)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        };
+        let (artist, title, modification) = (part("artist"), part("title"), part("modification"));
 
         let resolved = match resolve_publish_path(&ctx.paths().await, path, self.jobs.jobs_dir()) {
             Ok(resolved) => resolved,
@@ -375,11 +394,32 @@ impl Tools {
             }
         };
 
+        // A title reaches plainsong with all three parts or not at all: wavo joins
+        // them, filling in what the model left out (§7).
+        if artist.trim().is_empty() || modification.trim().is_empty() {
+            tracing::warn!(
+                chat_id = ctx.chat_id,
+                artist_missing = artist.trim().is_empty(),
+                modification_missing = modification.trim().is_empty(),
+                "the model left a title part out; wavo filled it in"
+            );
+        }
+        let title = if title.trim().is_empty() {
+            // The filename is wavo's own, so it names the stem at least.
+            resolved
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().to_string())
+                .unwrap_or_default()
+        } else {
+            title
+        };
+        let full_title = compose_track_title(&artist, &title, &modification, ctx.lang);
+
         if let Some(progress) = &ctx.progress {
             progress.stage(Msg::StageUploading).await;
         }
 
-        match self.plainsong.upload(&resolved, title).await {
+        match self.plainsong.upload(&resolved, &full_title).await {
             Ok(track) => {
                 let url = self.plainsong.track_url(&track.id);
                 ctx.record_published(PublishedTrack {

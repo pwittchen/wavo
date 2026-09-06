@@ -148,6 +148,7 @@ async fn run() -> anyhow::Result<()> {
         config: config.clone(),
         telegram,
         sessions: sessions.clone(),
+        inbox: Arc::new(wavo::telegram::collect::Inbox::new()),
         agent,
         jobs,
         plainsong,

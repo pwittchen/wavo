@@ -122,8 +122,9 @@ configuration change (`WAVO_MCP_TRANSPORT=stdio|http`) rather than a redesign.
 ### 3.3 Request lifecycle
 
 1. `getUpdates` returns a message from an allow-listed chat.
-2. wavo appends it to that chat's session history and acknowledges with a "thinking…"
-   message it will later edit.
+2. If the message is only half a request, it waits for its other half (§5.6); otherwise
+   — and once the halves are joined — wavo appends it to that chat's session history and
+   acknowledges with a "thinking…" message it will later edit.
 3. The LLM is called with the system prompt, the history, and the tool catalogue
    (§6). It either answers directly or requests one or more tool calls.
 4. Tool calls are dispatched (§6.3). Long ones (`process_audio`) acquire the job
@@ -138,7 +139,8 @@ configuration change (`WAVO_MCP_TRANSPORT=stdio|http`) rather than a redesign.
 
 - One in-flight turn per chat. A second message from the same chat while a turn is
   running is answered with a short "still working on the previous request" note and
-  dropped — not queued.
+  dropped — not queued. Messages that arrive *before* a turn starts are a different
+  case: they are collected into one request (§5.6).
 - A global `tokio::sync::Semaphore` with `WAVO_MAX_CONCURRENT_JOBS` permits (default
   `1`) guards `process_audio`. Spleeter is memory- and CPU-hungry; parallel runs on a
   small VPS make everything slower and can OOM. While a turn waits for a permit the
@@ -193,7 +195,7 @@ a restart (Telegram redelivers unconfirmed updates).
 | `/status` | Whether a job is running, queue length, uptime |
 | `/tracks` | Ten most recent plainsong tracks with links |
 | `/reset` | Clears this chat's session history |
-| `/cancel` | Requests cancellation of the running turn (§8.3) |
+| `/cancel` | Requests cancellation of the running turn (§8.3), or drops a request still waiting for its other half (§5.6) |
 
 - Anything else is a natural-language request handed to the LLM.
 
@@ -253,6 +255,40 @@ English out. Nothing is translated for the user and no language is ever announce
   `(message_id, Lang)` — an enum with two variants, not an i18n framework.
 - The links block of §5.4 is language-neutral apart from its one label, which follows
   the same rule (`all songs:` / `wszystkie utwory:`).
+
+---
+
+### 5.6 Coalescing half-requests
+
+People send a link and then say what to do with it, or say it first and paste the link
+after. Handled one message at a time, both halves are wrong: the first starts a run with
+wavo's defaults before the instruction arrives, and whichever half starts first makes
+the other bounce off the one-turn-per-chat rule of §3.4.
+
+So a message that is only **half** a request is held for `WAVO_COALESCE_WINDOW_SEC`
+(default `15`, `0` disables the whole mechanism) instead of starting a turn:
+
+- A request is whole when it names **what to work on** — a link, a song named in words,
+  or the song already under discussion in this chat — **and says what to do with it**.
+- A message that is only a link, only a song title, or only an instruction ("usuń wokal")
+  is half a request and starts the window.
+- Every further message from that chat joins the buffer and re-opens the window. As soon
+  as what has accumulated is whole, the turn starts immediately — no waiting out the rest
+  of the window.
+- When the window closes on a still-incomplete buffer, it runs **as it stands**: a lone
+  link is processed with the defaults of §6.2, a lone instruction gets the clarifying
+  question. Nothing is ever held indefinitely.
+- The halves reach the model as **one user message**, joined by newlines in the order
+  they were sent, so the history holds one request rather than two fragments.
+- The reply language is decided by the joined text (§5.5), not by the half that happened
+  to arrive first — a bare link followed by a Polish instruction gets a Polish reply.
+- `/reset` and `/cancel` drop a buffer that is still waiting; `/cancel` says so, since
+  nothing was running to cancel.
+
+The word lists that decide "instruction" from "song name" are a heuristic and are meant
+to stay one: they only decide *when* to start, never what to do. A song called "Karaoke"
+read as an instruction, or an instruction wavo has no word for, costs one window of
+waiting and nothing else.
 
 ---
 
@@ -319,6 +355,11 @@ It states:
   "przetransponuj"/"transpose").
 - That every processed file worth keeping should be published — for multi-stem modes,
   publish the stems the user actually asked for, not all of them.
+- That `publish_track` takes the title in three parts — `artist`, `title` and
+  `modification` — which wavo joins itself (§7): the artist and the song alone, never
+  translated and never pre-joined, and the modification ("bez wokalu", "vocals removed",
+  "tonacja a-moll", "slowed down to 80%", "oryginał" / "original" when nothing changed)
+  in the language of the user's most recent message, per file rather than per run.
 
 ### 6.3 Tool catalogue
 
@@ -347,7 +388,7 @@ description, parameters}}`. Two adjustments are applied by wavo before exposing 
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `publish_track` | `path` (string, from a `process_audio` result), `title` (string) | `{id, track_url, all_tracks_url, size_bytes}` |
+| `publish_track` | `path` (string, from a `process_audio` result), `artist`, `title`, `modification` (strings, joined by wavo — see §7) | `{id, track_url, all_tracks_url, size_bytes}` |
 | `list_tracks` | `q` (optional string) | Up to 10 `{id, title, track_url}` |
 | `delete_track` | `id` (string) | `{ok}` — exposed only when `WAVO_ALLOW_DELETE=true` (default `false`) |
 
@@ -404,8 +445,16 @@ directory.
 - Status handling: `401`/`403` → an operator-facing log line about the token plus a
   generic user message; `413` → the size message above; `415` → "that file type isn't
   accepted"; `5xx` → one retry after 2 s, then give up.
-- Titles are supplied by the model and sanitized by wavo: control characters stripped,
-  trimmed to 200 characters, falling back to the source filename when empty.
+- Titles are supplied by the model in three parts and **composed by wavo**, the way the
+  links block is (§5.4): `Artist — Title (modification)`, where the modification says
+  what was done to that file ("bez wokalu", "vocals removed", "zwolnione do 80%") in the
+  language of the user's most recent message. A part the model left out is filled with a
+  placeholder in that language — "Nieznany wykonawca" / "Unknown artist", "oryginał" /
+  "original" — and logged at `warn`, so a finished file is never lost to missing
+  metadata, and no stored title is missing a part. A part the model repeated (the artist
+  already at the head of the title, the modification already in it) is not said twice.
+- The composed title is then sanitized: control characters stripped, trimmed to 200
+  characters, falling back to the source filename when empty.
 
 ---
 
@@ -475,6 +524,7 @@ a single clear message naming the missing variable.
 | `WAVO_LLM_TIMEOUT_SEC` | `90` | | LLM request timeout |
 | `WAVO_HISTORY_TURNS` | `12` | | Retained user/assistant pairs per chat |
 | `WAVO_SESSION_TTL_MIN` | `120` | | Idle session eviction |
+| `WAVO_COALESCE_WINDOW_SEC` | `15` | | How long half a request waits for its other half (§5.6); `0` disables |
 | `WAVO_TOOL_OUTPUT_CHARS` | `2000` | | Truncation of tool stdout/stderr |
 | `WAVO_PROGRESS_INTERVAL_SEC` | `5` | | Minimum gap between progress edits |
 | `WAVO_KEEP_JOB_FILES` | `false` | | Keep job directories after publishing |
@@ -589,6 +639,7 @@ wavo/
     telegram/
       mod.rs           # long-polling loop, dispatch
       api.rs           # getUpdates / sendMessage / editMessageText
+      collect.rs       # half-request buffers and the coalescing window
       commands.rs      # /start /help /status /tracks /reset /cancel
       format.rs        # HTML escaping, truncation, links block
     llm/

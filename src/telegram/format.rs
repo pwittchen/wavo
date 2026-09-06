@@ -46,8 +46,11 @@ pub enum Msg {
     TracksUnavailable,
     ResetDone,
     CancelRequested,
+    CancelPending,
     CancelNothing,
     AllSongs,
+    TitleUnknownArtist,
+    TitleOriginal,
     ErrYoutubeBlocked,
     ErrNoResults,
     ErrModelDownload,
@@ -67,7 +70,7 @@ pub enum Msg {
 
 impl Msg {
     /// Used by the table test; also keeps the list in one place.
-    pub const ALL: [Msg; 36] = [
+    pub const ALL: [Msg; 39] = [
         Msg::Help,
         Msg::TextOnly,
         Msg::Busy,
@@ -87,8 +90,11 @@ impl Msg {
         Msg::TracksUnavailable,
         Msg::ResetDone,
         Msg::CancelRequested,
+        Msg::CancelPending,
         Msg::CancelNothing,
         Msg::AllSongs,
+        Msg::TitleUnknownArtist,
+        Msg::TitleOriginal,
         Msg::ErrYoutubeBlocked,
         Msg::ErrNoResults,
         Msg::ErrModelDownload,
@@ -185,11 +191,23 @@ pub fn t(msg: Msg, lang: Lang) -> &'static str {
         (Msg::CancelRequested, Lang::En) => "Stopping after the current step.",
         (Msg::CancelRequested, Lang::Pl) => "Zatrzymam się po bieżącym kroku.",
 
+        // Nothing had started yet — the half-request that was waiting for its
+        // other half is simply dropped (§5.6).
+        (Msg::CancelPending, Lang::En) => "Dropped the request I was still putting together.",
+        (Msg::CancelPending, Lang::Pl) => "Odrzuciłem prośbę, którą dopiero składałem.",
+
         (Msg::CancelNothing, Lang::En) => "Nothing is running.",
         (Msg::CancelNothing, Lang::Pl) => "Nic nie jest uruchomione.",
 
         (Msg::AllSongs, Lang::En) => "all songs",
         (Msg::AllSongs, Lang::Pl) => "wszystkie utwory",
+
+        // The two fallbacks a published title uses when the model left a part out.
+        (Msg::TitleUnknownArtist, Lang::En) => "Unknown artist",
+        (Msg::TitleUnknownArtist, Lang::Pl) => "Nieznany wykonawca",
+
+        (Msg::TitleOriginal, Lang::En) => "original",
+        (Msg::TitleOriginal, Lang::Pl) => "oryginał",
 
         (Msg::ErrYoutubeBlocked, Lang::En) => {
             "YouTube blocked the download. Try again later, or send a direct link."

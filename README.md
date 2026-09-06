@@ -89,8 +89,20 @@ A song can be named in words or handed over as a link. YouTube links in any of
 their usual shapes work — `youtube.com/watch?v=…`, `youtu.be/…`,
 `music.youtube.com/watch?v=…`, with timestamps and other parameters left on —
 and the link is handed to demix (and from there to yt-dlp) exactly as you sent
-it, with no YouTube search in between. A message that is nothing but a link is a complete request: it gets
-converted with the defaults (no stem separation, no tempo or pitch change).
+it, with no YouTube search in between.
+
+You do not have to fit it all into one message. A message that is only half a
+request — just a link, just a song title, just *"usuń wokal"* — waits about
+15 seconds (`WAVO_COALESCE_WINDOW_SEC`) for the rest, in either order:
+
+```
+you   https://youtu.be/fJ9rUzIMcZQ
+you   usuń wokal                      ← wavo starts here, on both messages at once
+```
+
+If the rest never comes, wavo runs what it has when the window closes: a lone
+link gets converted with the defaults (no stem separation, no tempo or pitch
+change), and a lone instruction gets a question about which song you mean.
 
 ```
 you   https://youtu.be/fJ9rUzIMcZQ slow it down to 80% and give me just the vocals
@@ -115,7 +127,7 @@ Commands are answered by wavo itself, without the model:
 | `/status` | whether a job is running, the queue, uptime |
 | `/tracks` | the ten most recent tracks in plainsong |
 | `/reset` | forget this chat's conversation |
-| `/cancel` | stop after the current step |
+| `/cancel` | stop after the current step, or drop a request still being collected |
 
 While a job runs, the acknowledgement message is edited in place with the stage
 and the elapsed time, and turns into the final answer when the run finishes.
@@ -145,6 +157,7 @@ a startup failure naming the variable.
 | `WAVO_LLM_TIMEOUT_SEC` | `90` | | LLM request timeout |
 | `WAVO_HISTORY_TURNS` | `12` | | Retained user/assistant pairs per chat |
 | `WAVO_SESSION_TTL_MIN` | `120` | | Idle session eviction |
+| `WAVO_COALESCE_WINDOW_SEC` | `15` | | How long half a request waits for its other half; `0` disables |
 | `WAVO_TOOL_OUTPUT_CHARS` | `2000` | | Truncation of tool stdout/stderr |
 | `WAVO_PROGRESS_INTERVAL_SEC` | `5` | | Minimum gap between progress edits |
 | `WAVO_KEEP_JOB_FILES` | `false` | | Keep job directories after publishing |
@@ -296,7 +309,7 @@ YouTube.
 | file | what lives there |
 | --- | --- |
 | `src/config.rs` | environment parsing; `Secret` redacts tokens in `Debug` |
-| `src/telegram/` | long polling, commands, HTML escaping, the bilingual string table |
+| `src/telegram/` | long polling, commands, coalescing half-requests, HTML escaping, the bilingual string table |
 | `src/llm/` | chat completions, the tool-calling loop, the system prompt |
 | `src/mcp/` | the `demix-mcp` child process, tool discovery, schema conversion |
 | `src/tools/` | the dispatch table, the plainsong client, the path guard |
@@ -312,8 +325,13 @@ Three rules are worth knowing when reading it:
 - **Tool failures are results, not errors.** A failed demix run comes back as
   `{"ok": false, "error": "…"}` so the model can correct itself, with the full
   stderr in the log and a classified, human sentence for the user.
-- **wavo composes its own links.** The track and listing links are appended by
-  wavo after the model's reply, so a hallucinated URL cannot reach a user.
+- **wavo composes its own links — and its own titles.** The track and listing
+  links are appended by wavo after the model's reply, so a hallucinated URL
+  cannot reach a user. `publish_track` likewise takes the title in three parts
+  (`artist`, `title`, `modification`) and wavo joins them into
+  `Artist — Title (modification)`, with the modification in the user's language;
+  a part the model left out gets a localized placeholder, so a title in the
+  music storage always names the performer, the song and what was done to it.
 
 ## where this deviates from SPEC.md
 

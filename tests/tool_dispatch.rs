@@ -241,7 +241,12 @@ async fn publishing_walks_from_a_relative_key_to_a_real_upload() {
         .call(
             &h.ctx,
             "publish_track",
-            json!({"path": "music/mp3/song_vocals.mp3", "title": "Bohemian Rhapsody — vocals"}),
+            json!({
+                "path": "music/mp3/song_vocals.mp3",
+                "artist": "Queen",
+                "title": "Bohemian Rhapsody",
+                "modification": "bez wokalu"
+            }),
         )
         .await;
 
@@ -253,10 +258,59 @@ async fn publishing_walks_from_a_relative_key_to_a_real_upload() {
     );
     assert_eq!(result["all_tracks_url"], "https://music.example.com/");
 
+    // The three parts reached plainsong joined into one title, in the multipart body.
+    let uploads = h._plainsong_stub.requests().await;
+    let body = &uploads.last().unwrap().body;
+    assert!(
+        body.contains("Queen — Bohemian Rhapsody (bez wokalu)"),
+        "the title plainsong received was: {body}"
+    );
+
     // The turn now knows about the track, which is what the links block is built from.
     let published = h.ctx.published().await;
     assert_eq!(published.len(), 1);
     assert_eq!(published[0].id, "7f1c");
+}
+
+#[tokio::test]
+async fn a_published_title_keeps_its_three_parts_even_when_the_model_skimps() {
+    if !python3_available() {
+        return;
+    }
+    let h = harness(
+        |_| {},
+        vec![(
+            201,
+            r#"{"id":"7f1c","title":"x","filename":"song_vocals.mp3","size_bytes":9}"#,
+        )],
+    )
+    .await;
+    // The user asked in Polish, so the parts wavo fills in are Polish.
+    let ctx = TurnCtx::new(42, Uuid::new_v4(), Lang::Pl, CancellationToken::new(), None);
+
+    h.tools
+        .call(&ctx, "process_audio", json!({"search": "Queen"}))
+        .await;
+    let job_dir = only_job_dir(&h.jobs);
+    std::fs::create_dir_all(job_dir.join("music/mp3")).unwrap();
+    std::fs::write(job_dir.join("music/mp3/song_vocals.mp3"), b"fake audio").unwrap();
+
+    let result = h
+        .tools
+        .call(
+            &ctx,
+            "publish_track",
+            json!({"path": "music/mp3/song_vocals.mp3", "title": "Bohemian Rhapsody"}),
+        )
+        .await;
+
+    assert_eq!(result["ok"], true);
+    let uploads = h._plainsong_stub.requests().await;
+    let body = &uploads.last().unwrap().body;
+    assert!(
+        body.contains("Nieznany wykonawca — Bohemian Rhapsody (oryginał)"),
+        "the title plainsong received was: {body}"
+    );
 }
 
 #[tokio::test]

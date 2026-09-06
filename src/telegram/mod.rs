@@ -1,6 +1,7 @@
 //! The long-polling loop and what happens to each message that comes out of it.
 
 pub mod api;
+pub mod collect;
 pub mod commands;
 pub mod format;
 
@@ -16,6 +17,7 @@ use crate::jobs::{JobManager, Progress};
 use crate::llm::{compose_reply, Agent, Outcome};
 use crate::session::{Sessions, TurnStart};
 use crate::telegram::api::{Message, Telegram, Update};
+use crate::telegram::collect::{Collected, Inbox};
 use crate::telegram::commands::Command;
 use crate::telegram::format::{t, Lang, Msg};
 use crate::tools::plainsong::PlainsongClient;
@@ -32,6 +34,8 @@ pub struct Bot {
     pub config: Arc<Config>,
     pub telegram: Telegram,
     pub sessions: Arc<Sessions>,
+    /// Half-requests waiting for their other half (§5.6).
+    pub inbox: Arc<Inbox>,
     pub agent: Arc<Agent>,
     pub jobs: Arc<JobManager>,
     pub plainsong: Arc<PlainsongClient>,
@@ -118,7 +122,41 @@ impl Bot {
             return;
         }
 
-        self.run_turn(chat_id, text, lang).await;
+        self.collect_and_run(chat_id, text, lang).await;
+    }
+
+    /// Hold a message that is only half a request until its other half arrives,
+    /// or until the window closes (§5.6). Whatever accumulated then runs as one
+    /// turn, with the language decided by the whole of it rather than by the
+    /// half that happened to arrive first.
+    async fn collect_and_run(self: Arc<Self>, chat_id: i64, text: String, lang: Lang) {
+        // A chat that is already working is told so straight away; waiting first
+        // would only delay the same answer (§3.4).
+        if self.sessions.busy_here(chat_id).await {
+            self.say(chat_id, t(Msg::Busy, lang)).await;
+            return;
+        }
+
+        let song_in_context = self.sessions.has_song_context(chat_id).await;
+        let request = match self.inbox.push(chat_id, &text, song_in_context).await {
+            Collected::Ready(request) => request,
+            Collected::Waiting(generation) => {
+                tracing::debug!(
+                    chat_id,
+                    window_sec = self.config.coalesce_window.as_secs(),
+                    "half a request — waiting for the rest"
+                );
+                tokio::time::sleep(self.config.coalesce_window).await;
+                match self.inbox.take_after_waiting(chat_id, generation).await {
+                    Some(request) => request,
+                    // A later message arrived and took the buffer with it.
+                    None => return,
+                }
+            }
+        };
+
+        let lang = self.sessions.language_for(chat_id, &request).await;
+        self.run_turn(chat_id, request, lang).await;
     }
 
     async fn run_command(&self, chat_id: i64, command: Command, lang: Lang) {
@@ -139,14 +177,18 @@ impl Bot {
             },
             Command::Reset => {
                 self.sessions.reset(chat_id).await;
+                self.inbox.clear(chat_id).await;
                 t(Msg::ResetDone, lang).to_string()
             }
             Command::Cancel => {
                 let cancelled = self.sessions.cancel(chat_id).await;
-                let msg = if cancelled {
-                    Msg::CancelRequested
-                } else {
-                    Msg::CancelNothing
+                // A request still waiting for its other half has not started, so
+                // it is dropped rather than cancelled (§5.6).
+                let dropped = self.inbox.clear(chat_id).await;
+                let msg = match (cancelled, dropped) {
+                    (true, _) => Msg::CancelRequested,
+                    (false, true) => Msg::CancelPending,
+                    (false, false) => Msg::CancelNothing,
                 };
                 t(msg, lang).to_string()
             }
