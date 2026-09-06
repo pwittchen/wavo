@@ -35,11 +35,14 @@ ARG DEMIX_MCP_REF=master
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# gpg-agent is not in the base image, and without it add-apt-repository cannot
+# import the PPA's signing key — it shells out to gpg, which refuses to start.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         git \
+        gpg-agent \
         software-properties-common \
     && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update \
@@ -51,7 +54,7 @@ RUN apt-get update \
         python3.8 \
         python3.8-venv \
         python3.8-distutils \
-    && apt-get purge -y software-properties-common \
+    && apt-get purge -y gpg-agent software-properties-common \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 
