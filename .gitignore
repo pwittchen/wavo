@@ -1,0 +1,4 @@
+/target
+.env
+docker-compose.override.yml
+.DS_Store
