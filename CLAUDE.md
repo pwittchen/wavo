@@ -33,7 +33,8 @@ it needs spleeter models, ffmpeg and a live plainsong.
 Running the binary needs `demix`, `demix-mcp`, `ffmpeg` and `yt-dlp` on `PATH`
 (startup checks refuse to start without them) plus a plainsong to talk to; see
 README's *development* section for the env vars. `docker compose up -d --build`
-is the real deployment and builds plainsong from a sibling checkout.
+is the real deployment; it builds wavo and pulls plainsong from
+`ghcr.io/pwittchen/plainsong`.
 
 ## Architecture
 

@@ -32,7 +32,6 @@ key for OpenAI (or any OpenAI-compatible provider), and Docker.
 
 ```sh
 git clone git@github.com:pwittchen/wavo.git
-git clone git@github.com:pwittchen/plainsong.git   # sibling checkout, see below
 cd wavo
 cp .env.example .env
 $EDITOR .env                 # tokens, and the chat IDs allowed to use the bot
@@ -49,10 +48,16 @@ INFO wavo::telegram: ignored a message from a chat that is not allowed chat_id=1
 
 — which is the number to put in `WAVO_ALLOWED_CHAT_IDS`.
 
-> plainsong does not publish a container image yet, so `docker-compose.yml`
-> builds it from a sibling checkout (`../plainsong`). If you have an image
-> instead, replace the `build:` line with `image: …` or put the change in a
-> git-ignored `docker-compose.override.yml`.
+> plainsong is pulled from `ghcr.io/pwittchen/plainsong:latest`; set
+> `PLAINSONG_IMAGE_TAG` in `.env` to pin another tag. To run it from a local
+> checkout instead, clone it next to wavo and put the build in a git-ignored
+> `docker-compose.override.yml`:
+>
+> ```yaml
+> services:
+>   plainsong:
+>     build: ../plainsong
+> ```
 
 > The image carries TensorFlow (via spleeter) and is 2–3 GB. Those wheels exist
 > for `linux/amd64` only, so on Apple Silicon build with
@@ -222,7 +227,6 @@ Three rules are worth knowing when reading it:
   `temperature: 0.2`; the `gpt-5*` family answers an explicit temperature with a
   400. wavo sends it, and on that one error stops sending it for the rest of the
   process rather than failing every turn.
-- **plainsong is built, not pulled.** See the note in the quick start.
 - **Two extra test files.** `tests/plainsong_client.rs`, `tests/mcp_client.rs`
   and `tests/tool_dispatch.rs` cover the integration level §14 asks for but the
   layout in §11 does not list.
