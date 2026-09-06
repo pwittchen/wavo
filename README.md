@@ -1,5 +1,7 @@
 # wavo
 
+[![CI](https://github.com/pwittchen/wavo/actions/workflows/ci.yml/badge.svg)](https://github.com/pwittchen/wavo/actions/workflows/ci.yml)
+
 AI agent for music processing.
 
 Send a Telegram message in plain language — *"oddziel wokal od Queen - Bohemian
