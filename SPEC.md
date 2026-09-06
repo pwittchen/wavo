@@ -28,6 +28,8 @@ without losing a listed requirement, it gets dropped.
 - Replying with a per-track link and a link to the full listing
 - Progress feedback while a long job runs
 - An allow-list of Telegram chat IDs — the bot answers nobody else
+- Bilingual operation: requests are understood in Polish and English, and every reply is
+  in the language the user wrote in
 - One `docker compose up` that starts plainsong and wavo (agent + demix + demix-mcp)
 
 ### Out of scope (explicitly not built)
@@ -204,8 +206,7 @@ strangers. An empty or unset value is a **startup failure**, not "allow everyone
 
 ### 5.4 Replies
 
-- The bot replies in the language of the user's message (the system prompt instructs
-  this; Polish and English are the expected cases).
+- The bot replies in the language of the user's message — see §5.5.
 - Progress: the initial acknowledgement message is edited in place, at most once every
   `WAVO_PROGRESS_INTERVAL_SEC` seconds (default `5`, Telegram rate limits are
   unforgiving), with the current stage — `downloading`, `separating stems`,
@@ -222,6 +223,36 @@ strangers. An empty or unset value is a **startup failure**, not "allow everyone
   pasted verbatim — errors are summarized into one or two human sentences (§8.2).
 - Formatting uses `parse_mode=HTML` with escaping of all interpolated values; MarkdownV2
   is avoided because its escaping rules are a recurring source of send failures.
+
+### 5.5 Language
+
+wavo is bilingual: it understands requests written in **Polish** and in **English**, and
+it answers in the language the user wrote in. Polish in → Polish out; English in →
+English out. Nothing is translated for the user and no language is ever announced.
+
+- **Detection is per message, by the model.** The system prompt (§6.2) instructs the
+  model to mirror the language of the most recent user message. There is no language
+  detection library, no `lang` field on the session, and no `/lang` command — this is
+  the simplicity rule of the intro applied to a problem an LLM already solves.
+- **Language may switch mid-conversation.** A chat that started in Polish and continues
+  in English gets English replies from that message onwards, with the history intact —
+  the previous song and settings are still in scope.
+- **A mixed-language message** (Polish sentence with English song titles or terms like
+  "vocals", "bpm") is treated as Polish: the dominant language of the sentence wins, and
+  proper nouns, song titles and stem names are never translated.
+- **When the language is genuinely undeterminable** — a bare URL, a bare song title,
+  an emoji — the model replies in the language of the last message in the chat that had
+  one, and in English if the chat has none.
+- **Strings wavo composes itself are bilingual too**, since they never pass through the
+  model: `/start` and `/help` blurbs, `/status` output, progress stages (§5.4), queue
+  position notices, the "still working on the previous request" note, the "I only
+  understand text for now" reply, and the classified demix errors of §8.2 all exist in a
+  Polish and an English variant. They are picked using the language of the triggering
+  user message, falling back to the chat's last known language and then to English.
+  These live in `telegram/format.rs` as a small `&str` lookup keyed by
+  `(message_id, Lang)` — an enum with two variants, not an i18n framework.
+- The links block of §5.4 is language-neutral apart from its one label, which follows
+  the same rule (`all songs:` / `wszystkie utwory:`).
 
 ---
 
@@ -273,8 +304,14 @@ It states:
 - That `target_key` and `transpose` are mutually exclusive.
 - That it must ask a clarifying question instead of guessing when the request names no
   identifiable song.
-- That it must reply in the user's language, briefly, without markdown tables or emoji
-  spam, and without pasting file paths or command lines.
+- That it must interpret requests in Polish and in English, and reply in the language of
+  the most recent user message — Polish for a Polish message, English for an English one
+  (§5.5) — briefly, without markdown tables or emoji spam, and without pasting file paths
+  or command lines. Clarifying questions and error explanations follow the same rule.
+- That song titles, artist names and stem names are never translated, and that Polish
+  music vocabulary maps onto the same tool arguments as its English equivalent
+  ("wokal"/"vocals", "podkład"/"instrumental", "zwolnij"/"slow down",
+  "przetransponuj"/"transpose").
 - That every processed file worth keeping should be published — for multi-stem modes,
   publish the stems the user actually asked for, not all of them.
 
@@ -614,7 +651,7 @@ wavo/
 
 | Level | What |
 | --- | --- |
-| Unit | MCP→OpenAI schema conversion (including the `cwd`/`output_dir` strip); path guard against traversal, symlinks and absolute paths; tool-output truncation; history trimming; Telegram HTML escaping; error classification (§8.2) against captured demix stderr samples |
+| Unit | MCP→OpenAI schema conversion (including the `cwd`/`output_dir` strip); path guard against traversal, symlinks and absolute paths; tool-output truncation; history trimming; Telegram HTML escaping; error classification (§8.2) against captured demix stderr samples; the `Lang` lookup — every wavo-composed string exists in both variants and falls back to English when the language is unknown |
 | Integration | The LLM loop against a stub HTTP server replaying scripted tool calls — covers budgets, escalation, malformed arguments and cancellation; the plainsong client against a stub returning `401`/`413`/`415`/`5xx`; the MCP layer against a stub MCP server binary, including a child that exits mid-call |
 | End-to-end | `#[ignore]`d test driving a real compose stack with a short local audio file: process → publish → assert the track is listed by `GET /api/tracks` and reachable at its stream URL |
 | CI | `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `docker build` (the e2e test is not run in CI — it needs the models and network) |
@@ -648,6 +685,12 @@ No test may call the real OpenAI API, the real Telegram API, or YouTube.
     `TELEGRAM_BOT_TOKEN`.
 12. A crafted request asking the bot to publish `/etc/passwd` or a path outside the job
     directory is refused by the path guard, and the refusal is visible in the log.
+13. "oddziel wokal od Queen - Bohemian Rhapsody" performs the same run as its English
+    equivalent in criterion 3 and every reply in that turn — progress stages, the final
+    summary and the links block label — is in Polish; switching to English in the next
+    message switches the replies to English without losing the song from history.
+14. `/help` sent after a Polish message returns the Polish blurb; sent after an English
+    message, the English one.
 
 ---
 
@@ -679,6 +722,10 @@ part of the system out of the critical path until the plumbing is proven.
   job model with a completion notification — a real design change, deliberately deferred.
 - **Whether `/work` should be a bind mount** so the operator can grab intermediate files.
   A named volume is specified; a bind mount needs `chown 10001` as in plainsong.
+- **A third language.** The model will happily answer in German or Spanish, but wavo's
+  own strings (§5.5) only exist in Polish and English, so such a turn would mix
+  languages. The spec accepts that: Polish and English are the supported pair, and the
+  `Lang` enum stays two-valued until there is a reason for a third.
 - **Cost ceiling.** There is no per-chat spend cap. With a one-or-two-user allow-list
   this is fine; it stops being fine the moment the allow-list grows.
 
