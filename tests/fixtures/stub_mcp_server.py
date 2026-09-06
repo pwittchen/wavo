@@ -69,6 +69,10 @@ def call_tool(request_id, params):
             },
             "cwd_seen": arguments.get("cwd", ""),
         }
+        # Echoed back so a test can see the link arrived exactly as the model sent
+        # it; `url` is one of the keys wavo keeps in a reduced result.
+        if arguments.get("url"):
+            payload["url"] = arguments["url"]
     else:
         payload = {"ok": False, "error": "unknown tool: %s" % name}
 

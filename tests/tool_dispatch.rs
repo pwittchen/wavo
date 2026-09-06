@@ -183,6 +183,32 @@ async fn a_run_lands_in_a_job_directory_wavo_chose_and_comes_back_trimmed() {
     assert!(stdout.chars().count() < 400);
 }
 
+/// A YouTube link is a source like any other: it reaches demix character for
+/// character, and wavo's own arguments are added around it, not over it.
+#[tokio::test]
+async fn a_youtube_link_reaches_demix_untouched() {
+    if !python3_available() {
+        return;
+    }
+    let h = harness(|_| {}, vec![(200, "[]")]).await;
+    let link = "https://www.youtube.com/watch?v=fJ9rUzIMcZQ&list=PL1234&t=42s";
+
+    let result = h
+        .tools
+        .call(
+            &h.ctx,
+            "process_audio",
+            json!({"url": link, "mode": "2stems"}),
+        )
+        .await;
+
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["url"], link, "the link was rewritten on the way");
+
+    let job_dir = only_job_dir(&h.jobs);
+    assert!(job_dir.starts_with(h.jobs.jobs_dir()));
+}
+
 #[tokio::test]
 async fn publishing_walks_from_a_relative_key_to_a_real_upload() {
     if !python3_available() {

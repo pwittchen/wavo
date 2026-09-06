@@ -111,17 +111,21 @@ impl Msg {
 pub fn t(msg: Msg, lang: Lang) -> &'static str {
     match (msg, lang) {
         (Msg::Help, Lang::En) => concat!(
-            "🎧 <b>wavo</b> — send me a song and what to do with it.\n\n",
+            "🎧 <b>wavo</b> — send me a song, by name or as a YouTube link, ",
+            "and what to do with it.\n\n",
             "Examples:\n",
             "• separate vocals from Queen - Bohemian Rhapsody\n",
+            "• https://youtu.be/fJ9rUzIMcZQ — instrumental, please\n",
             "• slow down that song to 80%\n",
             "• transpose it to A minor\n\n",
             "Commands: /status /tracks /reset /cancel"
         ),
         (Msg::Help, Lang::Pl) => concat!(
-            "🎧 <b>wavo</b> — napisz, jaki utwór i co z nim zrobić.\n\n",
+            "🎧 <b>wavo</b> — napisz, jaki utwór (tytuł albo link do YouTube) ",
+            "i co z nim zrobić.\n\n",
             "Przykłady:\n",
             "• oddziel wokal od Queen - Bohemian Rhapsody\n",
+            "• https://youtu.be/fJ9rUzIMcZQ — poproszę podkład\n",
             "• zwolnij ten utwór do 80%\n",
             "• przetransponuj go do a-moll\n\n",
             "Komendy: /status /tracks /reset /cancel"

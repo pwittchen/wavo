@@ -487,7 +487,14 @@ fn start_progress(
         .get("mode")
         .and_then(Value::as_str)
         .is_some_and(|mode| mode != "nosplit");
-    let remote = arguments.contains_key("url") || arguments.contains_key("search");
+    // A model that fills in the unused source arguments as nulls is not asking for
+    // a download, so the key alone does not settle it.
+    let remote = ["url", "search"].iter().any(|source| {
+        arguments
+            .get(*source)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    });
     let processing = if separating {
         Msg::StageSeparating
     } else {

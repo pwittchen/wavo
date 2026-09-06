@@ -3,7 +3,8 @@
 AI agent for music processing.
 
 Send a Telegram message in plain language — *"oddziel wokal od Queen - Bohemian
-Rhapsody"*, *"slow that song down to 80%"* — and wavo works out which
+Rhapsody"*, *"slow that song down to 80%"*, or a YouTube link with what to do
+with it — and wavo works out which
 [demix](https://github.com/pwittchen/demix) operations that means, runs them,
 publishes the result to [plainsong](https://github.com/pwittchen/plainsong), and
 replies with a link to the new track and a link to the whole collection.
@@ -65,9 +66,32 @@ Anything that is not a command is a request for the model:
 | --- | --- |
 | separate vocals from Queen - Bohemian Rhapsody | 2-stem run, publishes the vocals |
 | oddziel wokal od Queen - Bohemian Rhapsody | the same run, and answers in Polish |
+| `https://www.youtube.com/watch?v=fJ9rUzIMcZQ` give me the instrumental | takes the link as the source, 2-stem run, publishes the accompaniment |
 | slow that song down to 80% | reuses the song from the conversation, `tempo=0.8` |
 | przetransponuj go do a-moll | `target_key=Am` |
 | cut 1:00 to 2:30 and give me the instrumental | `start`/`end` plus a 2-stem run |
+
+A song can be named in words or handed over as a link. YouTube links in any of
+their usual shapes work — `youtube.com/watch?v=…`, `youtu.be/…`,
+`music.youtube.com/watch?v=…`, with timestamps and other parameters left on —
+and the link is handed to demix (and from there to yt-dlp) exactly as you sent
+it, with no YouTube search in between. A message that is nothing but a link is a complete request: it gets
+converted with the defaults (no stem separation, no tempo or pitch change).
+
+```
+you   https://youtu.be/fJ9rUzIMcZQ slow it down to 80% and give me just the vocals
+wavo  ⏳ Thinking…
+      ⏳ downloading… (0:04)
+      ⏳ separating stems… (1:12)
+      Here are the vocals at 80% speed.
+
+      ✅ Bohemian Rhapsody — vocals (0.8×)
+      🎵 https://music.example.com/track.html?id=7f1c…
+      📚 all songs: https://music.example.com/
+```
+
+The same message in Polish (*"zwolnij do 80% i zostaw sam wokal"*) does the same
+run and answers in Polish.
 
 Commands are answered by wavo itself, without the model:
 

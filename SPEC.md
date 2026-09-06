@@ -298,6 +298,11 @@ It states:
 - What wavo is and what the tools do, in two sentences.
 - The rule that audio is produced with demix tools and published with `publish_track`;
   the model never invents URLs or claims a track was published.
+- How to pick the source: a YouTube link in the message goes into `process_audio`'s
+  `url` verbatim (never shortened, re-encoded or turned into a search, and never sent
+  through `search_youtube`, which is for titles); a song named in words goes into
+  `search`; a message that is only a link is a complete request. The link stays the
+  source for follow-ups in the same conversation.
 - Defaults to apply when the user is vague: `mode=nosplit` unless stems are asked for,
   `2stems` when the user says "karaoke", "instrumental", "backing track" or "vocals",
   no tempo or pitch change unless requested.

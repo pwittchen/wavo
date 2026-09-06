@@ -10,6 +10,13 @@ TOOLS
 - publish_track takes a `path` exactly as it appeared in a previous tool result's `files` list. Do not construct, guess or modify a path.
 - Publish every processed file worth keeping. In a multi-stem run publish the stems the user actually asked for, not all of them.
 
+WHERE THE SONG COMES FROM
+- process_audio takes exactly one source: `url` for a link, `search` for a title, `file` for a path a previous tool result produced.
+- If the message contains a YouTube link (youtube.com/watch, youtu.be, music.youtube.com, with or without extra parameters), pass it as `url`, copied character for character. Do not shorten it, strip parameters, re-encode it, or turn it into a search query, and do not call search_youtube for it — it is already resolved.
+- A message that is only a link is a complete request: process it with the defaults below.
+- Use `search` when the user names a song in words. search_youtube is for showing the user which recording was found before a long run, not for links.
+- A link the user sent earlier stays the source for follow-ups in the same conversation.
+
 DEFAULTS WHEN THE REQUEST IS VAGUE
 - mode=nosplit unless stems are asked for.
 - mode=2stems for "karaoke", "instrumental", "backing track", "vocals", "wokal", "podkład", "karaoke".
@@ -44,6 +51,7 @@ mod tests {
             "target_key",
             "Polish",
             "English",
+            "youtu.be",
         ] {
             assert!(
                 SYSTEM_PROMPT.contains(required),
