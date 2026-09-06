@@ -9,10 +9,11 @@ services:
       PLAINSONG_MAX_UPLOAD_MB: ${PLAINSONG_MAX_UPLOAD_MB:-100}
     volumes:
       - plainsong-data:/data
-    # Published on the loopback interface only; put a reverse proxy in front of
-    # it to reach it from anywhere else.
+    # Published on all interfaces on port 40167, so the links wavo sends work
+    # without a reverse proxy. Set PLAINSONG_PUBLISH=127.0.0.1:8080 to go back
+    # to loopback-only and terminate TLS in front of it instead.
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${PLAINSONG_PUBLISH:-0.0.0.0:40167}:8080"
     restart: unless-stopped
 
   wavo:
@@ -29,7 +30,7 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
       OPENAI_MODEL_FALLBACK: ${OPENAI_MODEL_FALLBACK:-gpt-5}
       PLAINSONG_URL: http://plainsong:8080
-      PLAINSONG_PUBLIC_URL: ${PLAINSONG_PUBLIC_URL:-http://127.0.0.1:8080}
+      PLAINSONG_PUBLIC_URL: ${PLAINSONG_PUBLIC_URL:-http://127.0.0.1:40167}
       PLAINSONG_TOKEN: ${PLAINSONG_TOKEN:?set PLAINSONG_TOKEN in .env}
       PLAINSONG_MAX_UPLOAD_MB: ${PLAINSONG_MAX_UPLOAD_MB:-100}
       WAVO_MAX_CONCURRENT_JOBS: ${WAVO_MAX_CONCURRENT_JOBS:-1}

@@ -184,9 +184,17 @@ volume, and separating a normal-length song peaks around 2 GB of RAM.
 
 ### a public name for plainsong
 
-Compose publishes plainsong on `127.0.0.1:8080` only, so the links wavo sends
-are useless until something on the host terminates TLS in front of it — a Caddy
-site block is enough:
+Compose publishes plainsong on `0.0.0.0:40167`, so it is reachable from outside
+the host as soon as the firewall lets that port through. Either way, wavo has to
+be told the origin, or every link it sends will say `127.0.0.1`:
+
+```sh
+$EDITOR .env                   # PLAINSONG_PUBLIC_URL=http://vps.example.com:40167
+docker compose up -d           # recreates wavo with the new value
+```
+
+For TLS and a name without a port, keep plainsong on the loopback interface and
+put a reverse proxy in front of it — a Caddy site block is enough:
 
 ```
 music.example.com {
@@ -194,11 +202,10 @@ music.example.com {
 }
 ```
 
-Then point wavo at that name, or every link it sends will say `127.0.0.1`:
-
 ```sh
-$EDITOR .env                   # PLAINSONG_PUBLIC_URL=https://music.example.com
-docker compose up -d           # recreates wavo with the new value
+$EDITOR .env                   # PLAINSONG_PUBLISH=127.0.0.1:8080
+                               # PLAINSONG_PUBLIC_URL=https://music.example.com
+docker compose up -d
 ```
 
 ### upgrades and backups
