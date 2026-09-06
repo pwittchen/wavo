@@ -30,12 +30,15 @@ authentication is an allow-list of Telegram chat IDs.
 You need a Telegram bot token from [@BotFather](https://t.me/BotFather), an API
 key for OpenAI (or any OpenAI-compatible provider), and Docker.
 
+Both images are published, so there is nothing to clone and nothing to build —
+two files are the whole deployment:
+
 ```sh
-git clone git@github.com:pwittchen/wavo.git
-cd wavo
-cp .env.example .env
+mkdir wavo && cd wavo
+curl -O https://raw.githubusercontent.com/pwittchen/wavo/master/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/pwittchen/wavo/master/.env.example
 $EDITOR .env                 # tokens, and the chat IDs allowed to use the bot
-docker compose up -d --build
+docker compose up -d         # pulls both images
 docker compose logs -f wavo
 ```
 
@@ -48,22 +51,26 @@ INFO wavo::telegram: ignored a message from a chat that is not allowed chat_id=1
 
 — which is the number to put in `WAVO_ALLOWED_CHAT_IDS`.
 
-> plainsong is pulled from `ghcr.io/pwittchen/plainsong:latest`; set
-> `PLAINSONG_IMAGE_TAG` in `.env` to pin another tag. To run it from a local
-> checkout instead, clone it next to wavo and put the build in a git-ignored
-> `docker-compose.override.yml`:
+> wavo comes from `ghcr.io/pwittchen/wavo:latest`, published by this repo's CI
+> on every push to master, and plainsong from
+> `ghcr.io/pwittchen/plainsong:latest`; `WAVO_IMAGE_TAG` and
+> `PLAINSONG_IMAGE_TAG` in `.env` pin another tag — every build also gets a
+> `sha-<commit>` one. To run either from a local checkout instead, put the build
+> in a git-ignored `docker-compose.override.yml`:
 >
 > ```yaml
 > services:
+>   wavo:
+>     build: .
 >   plainsong:
 >     build: ../plainsong
 > ```
 
-> The image carries TensorFlow (via spleeter) and is 2–3 GB. Those wheels exist
-> for `linux/amd64` only, so on Apple Silicon build with
-> `docker compose build --build-arg BUILDPLATFORM=linux/amd64` or set
-> `DOCKER_DEFAULT_PLATFORM=linux/amd64`. The first separation downloads ~300 MB
-> of spleeter models into the `wavo-work` volume, where they stay.
+> The wavo image carries TensorFlow (via spleeter) and is 2–3 GB. Those wheels
+> exist for `linux/amd64` only, so that is the only platform published; on Apple
+> Silicon the image runs under emulation, which is too slow to separate
+> anything. The first separation downloads ~300 MB of spleeter models into the
+> `wavo-work` volume, where they stay.
 
 ## talking to it
 
@@ -159,14 +166,15 @@ when the MCP child is alive and plainsong answered within the last minute, and
 ## on a Linux VPS
 
 On a server that already has Docker and the compose plugin, the deployment is
-the quick start plus a public name for plainsong:
+the quick start plus a public name for plainsong. No checkout and no toolchain
+on the server — both images are pulled from ghcr.io:
 
 ```sh
-git clone https://github.com/pwittchen/wavo.git
-cd wavo
-cp .env.example .env
+mkdir wavo && cd wavo
+curl -O https://raw.githubusercontent.com/pwittchen/wavo/master/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/pwittchen/wavo/master/.env.example
 $EDITOR .env                   # tokens, chat IDs, PLAINSONG_PUBLIC_URL
-docker compose up -d --build   # the first build takes 10–20 minutes
+docker compose up -d           # the first pull is 2–3 GB
 docker compose ps              # both services should end up (healthy)
 docker compose logs -f wavo
 ```
@@ -177,10 +185,11 @@ there is no systemd unit to write. The bot needs no inbound port; Telegram is
 long-polled outbound.
 
 Pick an **amd64** machine: spleeter's TensorFlow wheels exist for `linux/amd64`
-only, so an arm64 VPS can run the image only under emulation, which is too slow
-to be useful. Two cores, 4 GB of RAM and 20 GB of disk is a comfortable floor —
-the image is 2–3 GB, the spleeter models another ~300 MB in the `wavo-work`
-volume, and separating a normal-length song peaks around 2 GB of RAM.
+only, so that is the only platform published and an arm64 VPS could run the
+image only under emulation, which is too slow to be useful. Two cores, 4 GB of
+RAM and 20 GB of disk is a comfortable floor — the image is 2–3 GB, the spleeter
+models another ~300 MB in the `wavo-work` volume, and separating a normal-length
+song peaks around 2 GB of RAM.
 
 ### a public name for plainsong
 
@@ -194,13 +203,8 @@ docker compose up -d           # recreates wavo with the new value
 ```
 
 For TLS and a name without a port, keep plainsong on the loopback interface and
-put a reverse proxy in front of it — a Caddy site block is enough:
-
-```
-music.example.com {
-    reverse_proxy 127.0.0.1:8080
-}
-```
+put a reverse proxy of your choice in front of it, forwarding to
+`127.0.0.1:8080`:
 
 ```sh
 $EDITOR .env                   # PLAINSONG_PUBLISH=127.0.0.1:8080
@@ -211,11 +215,14 @@ docker compose up -d
 ### upgrades and backups
 
 ```sh
-git pull
-docker compose pull            # plainsong, from ghcr.io
-docker compose up -d --build   # wavo, from the checkout
+docker compose pull            # both images, from ghcr.io
+docker compose up -d           # recreates whatever moved
 docker image prune -f
 ```
+
+The compose file itself changes rarely; when it does, re-download it with the
+`curl` from above before pulling. Pinning `WAVO_IMAGE_TAG` and
+`PLAINSONG_IMAGE_TAG` to `sha-` tags is how to stop `pull` from moving you.
 
 `wavo_plainsong-data` holds the collection and is the only volume worth backing
 up; `wavo_wavo-work` is job scratch plus the model cache, and throwing it away
@@ -261,6 +268,14 @@ plainsong to talk to:
 TELEGRAM_BOT_TOKEN=… WAVO_ALLOWED_CHAT_IDS=… OPENAI_API_KEY=… \
 PLAINSONG_URL=http://127.0.0.1:8080 PLAINSONG_TOKEN=… \
 WAVO_WORK_DIR=./work RUST_LOG=wavo=debug cargo run
+```
+
+The compose file runs the published image, so building the one you just changed
+takes a git-ignored `docker-compose.override.yml` with `build: .` under `wavo`
+(the block in the quick start), and then:
+
+```sh
+docker compose up -d --build   # the first build takes 10–20 minutes
 ```
 
 The end-to-end test is `#[ignore]`d because it needs a real demix install and a
@@ -316,6 +331,11 @@ Three rules are worth knowing when reading it:
   `temperature: 0.2`; the `gpt-5*` family answers an explicit temperature with a
   400. wavo sends it, and on that one error stops sending it for the rest of the
   process rather than failing every turn.
+- **Compose runs a published wavo image, not `build: .`.** §10.4 builds wavo
+  from the checkout. CI publishes `ghcr.io/pwittchen/wavo` on every push to
+  master, so a server needs the compose file and an `.env` and nothing else; a
+  local build is the `docker-compose.override.yml` the same section already
+  prescribes for plainsong.
 - **Two extra test files.** `tests/plainsong_client.rs`, `tests/mcp_client.rs`
   and `tests/tool_dispatch.rs` cover the integration level §14 asks for but the
   layout in §11 does not list.

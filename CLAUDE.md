@@ -32,9 +32,11 @@ it needs spleeter models, ffmpeg and a live plainsong.
 
 Running the binary needs `demix`, `demix-mcp`, `ffmpeg` and `yt-dlp` on `PATH`
 (startup checks refuse to start without them) plus a plainsong to talk to; see
-README's *development* section for the env vars. `docker compose up -d --build`
-is the real deployment; it builds wavo and pulls plainsong from
-`ghcr.io/pwittchen/plainsong`.
+README's *development* section for the env vars. `docker compose up -d` is the
+real deployment; it pulls both images from ghcr.io
+(`ghcr.io/pwittchen/wavo`, published by this repo's CI on every push to master,
+and `ghcr.io/pwittchen/plainsong`). A local build is a `build: .` in a
+git-ignored `docker-compose.override.yml`.
 
 ## Architecture
 

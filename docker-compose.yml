@@ -17,8 +17,10 @@ services:
     restart: unless-stopped
 
   wavo:
-    build: .
-    image: wavo
+    # Published by this repo's CI on every push to master. To build from the
+    # checkout instead, put `build: .` in a git-ignored
+    # docker-compose.override.yml; see the README.
+    image: ghcr.io/pwittchen/wavo:${WAVO_IMAGE_TAG:-latest}
     depends_on:
       plainsong:
         condition: service_healthy
