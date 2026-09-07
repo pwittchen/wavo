@@ -81,8 +81,9 @@ jobs:
             type=raw,value=latest
             type=sha,format=long
 
-      # spleeter's TensorFlow wheels are linux/amd64-only (see the Dockerfile),
-      # so there is one platform to publish.
+      # One platform to publish: essentia, which demix uses for key detection,
+      # has no linux/aarch64 wheel (see the Dockerfile). TensorFlow itself would
+      # be fine on arm64.
       - name: Build and push
         uses: docker/build-push-action@v7
         with:

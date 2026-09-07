@@ -7,8 +7,11 @@
 # The two Python environments are built before the Rust binary is copied in, so
 # editing wavo's source rebuilds only the last, cheap layer.
 #
-# NOTE: spleeter's TensorFlow wheels for Python 3.8 exist for linux/amd64 only.
-# On an arm64 host, build with `--platform linux/amd64`.
+# NOTE: this image is linux/amd64 only. TensorFlow and tensorflow-io do publish
+# cp38 aarch64 wheels, but essentia — which demix uses for key detection — has
+# never published a linux aarch64 wheel in any release, and building it from
+# source pulls in its whole C++ dependency tree. On an arm64 host, build with
+# `--platform linux/amd64`.
 
 # --- build the agent ---------------------------------------------------------
 

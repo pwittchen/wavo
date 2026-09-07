@@ -66,10 +66,14 @@ INFO wavo::telegram: ignored a message from a chat that is not allowed chat_id=1
 >     build: ../plainsong
 > ```
 
-> The wavo image carries TensorFlow (via spleeter) and is 2–3 GB. Those wheels
-> exist for `linux/amd64` only, so that is the only platform published; on Apple
-> Silicon the image runs under emulation, which is too slow to separate
-> anything. The first separation downloads ~300 MB of spleeter models into the
+> The wavo image carries TensorFlow (via spleeter) and is 2–3 GB. It is
+> published for `linux/amd64` only, because essentia — demix's key detection —
+> has no `linux/aarch64` wheel. On Apple Silicon it runs under Rosetta, and
+> speed is not the problem — a 4-minute 2-stem separation measures ~13 s — but
+> memory is: 4 stems on a full-length track needs more than Docker Desktop's
+> default 8 GB VM and is OOM-killed. Pin `platform: linux/amd64` on both
+> services in a `docker-compose.override.yml` and give the VM 12 GB or more.
+> The first separation downloads ~300 MB of spleeter models into the
 > `wavo-work` volume, where they stay.
 
 ## talking to it
@@ -197,9 +201,10 @@ docker compose logs -f wavo
 there is no systemd unit to write. The bot needs no inbound port; Telegram is
 long-polled outbound.
 
-Pick an **amd64** machine: spleeter's TensorFlow wheels exist for `linux/amd64`
-only, so that is the only platform published and an arm64 VPS could run the
-image only under emulation, which is too slow to be useful. Two cores, 4 GB of
+Pick an **amd64** machine: essentia, which demix uses for key detection, has
+never published a `linux/aarch64` wheel, so that is the only platform published
+and an arm64 VPS could run the image only under emulation, which is too slow to
+be useful. Two cores, 4 GB of
 RAM and 20 GB of disk is a comfortable floor — the image is 2–3 GB, the spleeter
 models another ~300 MB in the `wavo-work` volume, and separating a normal-length
 song peaks around 2 GB of RAM.
