@@ -9,11 +9,15 @@ services:
       PLAINSONG_MAX_UPLOAD_MB: ${PLAINSONG_MAX_UPLOAD_MB:-100}
     volumes:
       - plainsong-data:/data
-    # Published on all interfaces on port 40167, so the links wavo sends work
-    # without a reverse proxy. Set PLAINSONG_PUBLISH=127.0.0.1:8080 to go back
-    # to loopback-only and terminate TLS in front of it instead.
+    # Published on port 40167 on every interface, IPv4 *and* IPv6, so the links
+    # wavo sends work without a reverse proxy. The bare port is what binds both
+    # `0.0.0.0` and `[::]`; spelling it out as `0.0.0.0:40167` silently means
+    # IPv4 only, and anything that reaches the container over the host's public
+    # IPv6 — a VPS provider's domain proxy, say — then finds nothing there. Set
+    # PLAINSONG_PUBLISH=127.0.0.1:8080 to go back to loopback-only and terminate
+    # TLS in front of it instead.
     ports:
-      - "${PLAINSONG_PUBLISH:-0.0.0.0:40167}:8080"
+      - "${PLAINSONG_PUBLISH:-40167}:8080"
     restart: unless-stopped
 
   wavo:
