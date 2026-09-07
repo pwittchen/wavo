@@ -591,8 +591,67 @@ impl DemixFailure {
     }
 }
 
+/// Lines a demix run prints whatever its outcome. essentia logs
+/// `[   INFO   ] MusicExtractorSVM: no classifier models were configured by
+/// default` the moment `demix` imports it, so it is the first line of stderr of
+/// *every* run, successful or not. Left in, it becomes both the "detail" a
+/// failing run reports to the user and a stray "model" in the haystack the
+/// download check below matches on (§8.2).
+fn is_log_noise(line: &str) -> bool {
+    // essentia's own log: `[   INFO   ] …`, `[ WARNING ] …`. `[ ERROR ]` and
+    // anything else bracketed stays — that is signal.
+    if let Some((level, _)) = line.strip_prefix('[').and_then(|rest| rest.split_once(']')) {
+        if matches!(
+            level.trim().to_ascii_lowercase().as_str(),
+            "info" | "warning" | "debug"
+        ) {
+            return true;
+        }
+    }
+    let lower = line.to_lowercase();
+    // Python's `warnings` module, and TensorFlow's chatter under it.
+    lower.starts_with("warning:") || (lower.contains("warning:") && lower.contains(".py:"))
+}
+
+/// The lines of demix output that say something about this particular run.
+fn useful_lines(text: &str) -> Vec<&str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !is_log_noise(line))
+        .collect()
+}
+
+/// The one line to show a user when nothing more specific was recognised.
+///
+/// A Python traceback puts the reason on its *last* line and scaffolding on the
+/// first, so a traceback is read from the end; everything else from the front.
+fn failure_detail(stdout: &str, stderr: &str) -> String {
+    let lines = useful_lines(stderr);
+    let line = if lines
+        .first()
+        .is_some_and(|line| line.starts_with("Traceback (most recent call last)"))
+    {
+        lines.last().copied()
+    } else {
+        lines.first().copied()
+    };
+    // demix reports some failures on stdout as one human sentence and leaves
+    // stderr to essentia alone.
+    let line = line.or_else(|| {
+        useful_lines(stdout)
+            .into_iter()
+            .find(|line| line.starts_with("Error:"))
+    });
+    line.unwrap_or_default().chars().take(200).collect()
+}
+
 pub fn classify_demix_error(stdout: &str, stderr: &str) -> DemixFailure {
-    let haystack = format!("{stdout}\n{stderr}").to_lowercase();
+    let haystack = format!(
+        "{}\n{}",
+        useful_lines(stdout).join("\n"),
+        useful_lines(stderr).join("\n")
+    )
+    .to_lowercase();
 
     if haystack.contains("http error 403")
         || haystack.contains("all download strategies failed")
@@ -623,15 +682,7 @@ pub fn classify_demix_error(stdout: &str, stderr: &str) -> DemixFailure {
         return DemixFailure::ModelDownload;
     }
 
-    let first_line = stderr
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or("")
-        .chars()
-        .take(200)
-        .collect::<String>();
-    DemixFailure::Other(first_line)
+    DemixFailure::Other(failure_detail(stdout, stderr))
 }
 
 #[cfg(test)]
@@ -682,14 +733,72 @@ mod tests {
     }
 
     #[test]
-    fn anything_else_keeps_the_first_line_of_stderr() {
+    fn anything_else_keeps_the_useful_line_of_stderr() {
+        // A traceback says what went wrong on its last line, not its first.
         let failure = classify_demix_error("", "\n  Traceback (most recent call last):\nboom\n");
-        assert_eq!(
-            failure,
-            DemixFailure::Other("Traceback (most recent call last):".to_string())
-        );
+        assert_eq!(failure, DemixFailure::Other("boom".to_string()));
         assert!(failure.message(Lang::En).starts_with("Processing failed."));
         assert!(failure.message(Lang::Pl).starts_with("Przetwarzanie"));
+
+        assert_eq!(
+            classify_demix_error("", "\nboom\nand then some\n"),
+            DemixFailure::Other("boom".to_string())
+        );
+    }
+
+    /// essentia logs this on import, so it opens the stderr of every demix run.
+    const ESSENTIA_BANNER: &str =
+        "[   INFO   ] MusicExtractorSVM: no classifier models were configured by default";
+
+    #[test]
+    fn the_essentia_banner_is_never_reported_as_the_failure() {
+        let stderr = format!(
+            "{ESSENTIA_BANNER}\n\
+             Traceback (most recent call last):\n  \
+             File \"/opt/venv-demix/lib/python3.8/site-packages/demix/cli.py\", line 365\n    \
+             subprocess.run(cmd, check=True)\n\
+             subprocess.CalledProcessError: Command '['ffmpeg']' returned non-zero exit status 1."
+        );
+        let failure = classify_demix_error("Converting audio file to WAV...", &stderr);
+        let DemixFailure::Other(detail) = &failure else {
+            panic!("expected an unclassified failure, got {failure:?}");
+        };
+        assert!(
+            detail.starts_with("subprocess.CalledProcessError:"),
+            "{detail}"
+        );
+        for lang in [Lang::En, Lang::Pl] {
+            assert!(!failure.message(lang).contains("MusicExtractorSVM"));
+        }
+    }
+
+    #[test]
+    fn the_essentia_banner_does_not_make_a_download_look_like_a_model_download() {
+        // "no classifier models were configured" used to supply the "model" the
+        // spleeter-model check looks for; yt-dlp supplies the rest.
+        let stderr = format!("{ESSENTIA_BANNER}\nERROR: unable to download webpage: timed out");
+        assert_eq!(
+            classify_demix_error("[download] Destination: video.webm", &stderr),
+            DemixFailure::Other("ERROR: unable to download webpage: timed out".to_string())
+        );
+    }
+
+    #[test]
+    fn a_demix_error_printed_on_stdout_is_used_when_stderr_is_only_noise() {
+        assert_eq!(
+            classify_demix_error(
+                "Processing: /work/x.mp3\nError: File not found",
+                ESSENTIA_BANNER
+            ),
+            DemixFailure::Other("Error: File not found".to_string())
+        );
+    }
+
+    #[test]
+    fn a_run_that_says_nothing_useful_falls_back_to_the_bare_sentence() {
+        let failure = classify_demix_error("", ESSENTIA_BANNER);
+        assert_eq!(failure, DemixFailure::Other(String::new()));
+        assert_eq!(failure.message(Lang::En), "Processing failed.");
     }
 
     #[test]

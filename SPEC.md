@@ -490,7 +490,16 @@ related. `process_audio` returning `ok:false` is classified before being surface
 | No search results | "I couldn't find that song on YouTube — try adding the artist." |
 | `ffmpeg` / `ffprobe` not found | Operator-facing: a startup check should have caught this (§10.3) |
 | Spleeter model download failure | "The separation model couldn't be downloaded; retrying later usually works." |
-| Anything else | "Processing failed." plus the first line of stderr, truncated to 200 chars |
+| Anything else | "Processing failed." plus the most informative line of the output, truncated to 200 chars |
+
+Classification and that last line both read demix's output with its **constant noise
+removed** first: essentia logs `[   INFO   ] MusicExtractorSVM: no classifier models were
+configured by default` as `demix` imports it, so it opens the stderr of every run,
+successful or not, and bracketed log levels and Python warnings are dropped for the same
+reason. Of what is left, a Python traceback is read from its last line — the exception —
+and anything else from its first; when stderr says nothing of its own, a `Error: …` line
+demix printed on stdout is used; when nothing survives, the bare "Processing failed."
+stands alone.
 
 The full stderr always goes to the log at `warn`, regardless of what the user sees.
 
