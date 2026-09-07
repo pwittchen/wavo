@@ -54,6 +54,7 @@ async fn run() -> anyhow::Result<()> {
 
     check_work_dir(&config.work_dir).await?;
     check_binaries(&config)?;
+    report_downloader().await;
 
     let telegram = Telegram::new(&config.telegram_api_base, &config.telegram_token);
     let username = telegram
@@ -211,6 +212,121 @@ fn check_binaries(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Say which yt-dlp is installed and what demix will pass it, once, at startup.
+///
+/// Neither is fatal, and neither is visible anywhere else: the version is baked
+/// into the image (the Dockerfile's `YT_DLP_VERSION`) and `DEMIX_YT_DLP_ARGS` is
+/// read by demix, not by wavo. But between them they answer nearly every report
+/// of "YouTube blocked the download" (§8.2) — a stale yt-dlp, or a cookies file
+/// that the container cannot read — and guessing at those from the outside
+/// costs a deployment round trip.
+async fn report_downloader() {
+    match tokio::process::Command::new("yt-dlp")
+        .arg("--version")
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            tracing::info!(version = %version, "yt-dlp");
+        }
+        // `which` already found it, so this is a broken install, not a missing
+        // one; downloads will fail, but everything else still works.
+        Ok(output) => tracing::warn!(
+            status = %output.status,
+            "`yt-dlp --version` failed; YouTube downloads are unlikely to work"
+        ),
+        Err(e) => tracing::warn!(error = %e, "cannot run `yt-dlp --version`"),
+    }
+
+    let args = std::env::var("DEMIX_YT_DLP_ARGS").unwrap_or_default();
+    if args.trim().is_empty() {
+        return;
+    }
+    tracing::info!(args = %args, "demix will pass extra arguments to yt-dlp");
+    for path in cookie_files(&args) {
+        // The mount is the part that goes wrong: the container runs as uid
+        // 10001, and a cookies file it cannot read is passed to yt-dlp all the
+        // same, which then fails with the same 403 as if it had none. A
+        // directory here is the usual mistake — a bind mount whose source does
+        // not exist on the host makes Docker create one at both ends — and it
+        // opens cleanly on Linux, so `is_file` is what settles it.
+        let complaint = match std::fs::File::open(&path).and_then(|file| file.metadata()) {
+            Ok(meta) if meta.is_file() => None,
+            Ok(_) => Some(
+                "is not a file (a bind mount with no source file makes Docker \
+                           create a directory in its place)"
+                    .to_string(),
+            ),
+            Err(e) => Some(e.to_string()),
+        };
+        match complaint {
+            None => tracing::info!(path = %path, "yt-dlp cookies file is readable"),
+            Some(complaint) => tracing::warn!(
+                path = %path,
+                error = %complaint,
+                "DEMIX_YT_DLP_ARGS names a cookies file wavo cannot read; \
+                 YouTube downloads will behave as if there were no cookies"
+            ),
+        }
+    }
+}
+
+/// The cookies files named in a `DEMIX_YT_DLP_ARGS` value.
+fn cookie_files(args: &str) -> Vec<String> {
+    let words = split_args(args);
+    let mut paths = Vec::new();
+    for (index, word) in words.iter().enumerate() {
+        let path = match word.strip_prefix("--cookies") {
+            Some("") => words.get(index + 1).map(String::as_str),
+            // `--cookies-from-browser` lands here too, and is left alone: it
+            // names a browser profile, and a container has no browser.
+            Some(rest) => rest.strip_prefix('='),
+            None => None,
+        };
+        match path {
+            Some(path) if !path.is_empty() => paths.push(path.to_string()),
+            _ => {}
+        }
+    }
+    paths
+}
+
+/// Split a `DEMIX_YT_DLP_ARGS` value into words the way demix does. demix uses
+/// `shlex.split`, so a quoted path holding spaces is one argument; splitting on
+/// whitespace instead would have wavo warn about half a path that is fine.
+fn split_args(args: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote: Option<char> = None;
+    let mut started = false;
+
+    for c in args.chars() {
+        match quote {
+            Some(open) if c == open => quote = None,
+            Some(_) => word.push(c),
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                started = true;
+            }
+            None if c.is_whitespace() => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            None => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
+}
+
 fn which(binary: &str) -> Option<PathBuf> {
     if binary.contains('/') {
         let path = PathBuf::from(binary);
@@ -243,4 +359,45 @@ async fn wait_for_signal() {
 #[cfg(not(unix))]
 async fn wait_for_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cookie_files, split_args};
+
+    #[test]
+    fn a_cookies_file_is_found_however_it_is_spelled() {
+        assert_eq!(
+            cookie_files("--cookies /work/cookies.txt"),
+            ["/work/cookies.txt"]
+        );
+        assert_eq!(
+            cookie_files("--cookies=/work/cookies.txt"),
+            ["/work/cookies.txt"]
+        );
+        assert_eq!(
+            cookie_files("-N 4 --cookies '/work/my cookies.txt'"),
+            ["/work/my cookies.txt"]
+        );
+    }
+
+    #[test]
+    fn quoting_survives_the_split_as_it_does_in_demix() {
+        assert_eq!(split_args("  -N   4 "), ["-N", "4"]);
+        assert_eq!(
+            split_args("--cookies \"/a b/c.txt\""),
+            ["--cookies", "/a b/c.txt"]
+        );
+        assert!(split_args("   ").is_empty());
+    }
+
+    #[test]
+    fn nothing_is_found_where_there_is_no_cookies_file() {
+        assert!(cookie_files("").is_empty());
+        // A browser jar is not a path, and inside a container there is no
+        // browser to take one from anyway.
+        assert!(cookie_files("--cookies-from-browser chrome").is_empty());
+        // A trailing `--cookies` names nothing; yt-dlp rejects it itself.
+        assert!(cookie_files("--cookies").is_empty());
+    }
 }

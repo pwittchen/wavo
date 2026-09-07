@@ -258,10 +258,24 @@ docker run --rm -v wavo_plainsong-data:/data -v "$PWD:/backup" busybox \
 
 ### when YouTube gets suspicious
 
-Datacenter IP ranges are the ones YouTube asks to *"sign in to confirm you're
-not a bot"*, so a download that works at home can fail on a VPS. Export cookies
-from a browser where you are signed in and hand the file to yt-dlp through a
-git-ignored `docker-compose.override.yml`:
+*"YouTube blocked the download"* means demix ran out of ways in: four yt-dlp
+player clients and a `pytubefix` fallback all refused. Two things cause it, and
+wavo names both in its startup log, so read that first:
+
+```sh
+docker compose logs wavo | grep -E 'yt-dlp|cookies'
+```
+
+**A stale yt-dlp.** YouTube breaks it every few weeks, and the image pins a
+version (`YT_DLP_VERSION` in the [Dockerfile](Dockerfile)) precisely so the
+build cache cannot keep shipping an old one. If the logged version is months
+behind [the current release](https://pypi.org/project/yt-dlp/), bump the `ARG`,
+push, and `docker compose pull && docker compose up -d`.
+
+**A datacenter IP.** Those are the ranges YouTube asks to *"sign in to confirm
+you're not a bot"*, so a download that works at home fails on a VPS however
+fresh yt-dlp is. Export cookies from a browser where you are signed in and hand
+the file to yt-dlp through a git-ignored `docker-compose.override.yml`:
 
 ```yaml
 services:
@@ -273,7 +287,11 @@ services:
 ```
 
 The container runs as uid 10001, so the file has to be readable by it
-(`chmod 644 cookies.txt`).
+(`chmod 644 cookies.txt`); wavo warns at startup if it is not, because yt-dlp
+is handed an unreadable cookies file without complaining and then fails exactly
+as if it had none. Cookies expire, and they tie the account they came from to
+the VPS — YouTube does ban accounts for this, so use one you can afford to
+lose.
 
 ## development
 

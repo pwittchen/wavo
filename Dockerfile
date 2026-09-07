@@ -36,6 +36,15 @@ FROM ubuntu:22.04
 ARG DEMIX_VERSION=1.7.2
 ARG DEMIX_MCP_REF=master
 
+# yt-dlp is pinned, and the pin is the point: CI builds with `cache-from:
+# type=gha`, so an unpinned `pip install yt-dlp` sits in a RUN line that never
+# changes and is restored from the layer cache for ever — the image keeps
+# shipping whatever release the first build happened to fetch, however green CI
+# looks. YouTube breaks yt-dlp every few weeks, so bump this when downloads
+# start failing with "YouTube blocked the download"; that is what invalidates
+# the layer. Releases: https://pypi.org/project/yt-dlp/
+ARG YT_DLP_VERSION=2026.8.19
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 # gpg-agent is not in the base image, and without it add-apt-repository cannot
@@ -66,7 +75,7 @@ RUN apt-get update \
 RUN python3.10 -m venv /opt/venv-mcp \
     && /opt/venv-mcp/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv-mcp/bin/pip install --no-cache-dir \
-        yt-dlp \
+        "yt-dlp==${YT_DLP_VERSION}" \
         "demix-mcp @ git+https://github.com/pwittchen/demix.git@${DEMIX_MCP_REF}#subdirectory=mcp"
 
 # Python 3.8: demix itself. `essentia` is what key detection and transposition
