@@ -455,6 +455,15 @@ directory.
   already at the head of the title, the modification already in it) is not said twice.
 - The composed title is then sanitized: control characters stripped, trimmed to 200
   characters, falling back to the source filename when empty.
+- The **filename** a track is stored under is composed by wavo too, and is unique per
+  upload: a fresh UUIDv4, an underscore, then the composed title normalized —
+  diacritics folded onto their ASCII letter (`Zażółć` → `Zazolc`), every run of
+  anything outside `[A-Za-z0-9]` collapsed into one underscore, capped at 80
+  characters — then the source extension:
+  `1f0c…_Kult_Arahja_bez_wokalu.mp3`. demix names every run of one stem the same
+  (`song_vocals.mp3`), so without this two uploads could collide in the store; the
+  slug is only there so the files can be told apart by eye. A title that normalizes
+  to nothing leaves the UUID alone.
 
 ---
 

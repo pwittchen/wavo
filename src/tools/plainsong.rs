@@ -113,12 +113,15 @@ impl PlainsongClient {
             .await
             .map_err(|e| PlainsongError::Io(format!("cannot read {}: {e}", path.display())))?;
         let title = sanitize_title(title, &filename);
+        // The local name is demix's (`song_vocals.mp3`), and two turns produce it
+        // just as easily as one; what plainsong stores is unique per upload (§7).
+        let upload_name = upload_filename(&title, extension);
 
         let mut attempt = 0;
         loop {
             attempt += 1;
             let part = reqwest::multipart::Part::bytes(bytes.clone())
-                .file_name(filename.clone())
+                .file_name(upload_name.clone())
                 .mime_str(mime_for(extension))
                 .map_err(|e| PlainsongError::UnsupportedType(e.to_string()))?;
             let form = reqwest::multipart::Form::new()
@@ -257,6 +260,91 @@ pub fn sanitize_title(title: &str, filename: &str) -> String {
     }
 }
 
+/// Longest slug appended to the UUID; enough to recognise a track by eye without
+/// pushing the whole name near a filesystem's 255-byte limit.
+const MAX_SLUG_CHARS: usize = 80;
+
+/// The name a file carries in plainsong: a fresh UUID, then the track's title
+/// normalized, then the original extension — `1f0c…_Queen_Bohemian_Rhapsody
+/// _bez_wokalu.mp3`.
+///
+/// The name demix produced is not unique (every run of one stem is
+/// `song_vocals.mp3`), so two uploads could otherwise collide in the store. The
+/// UUID makes that impossible; the slug is there only so an operator looking at
+/// the files can tell them apart.
+pub fn upload_filename(title: &str, extension: &str) -> String {
+    let id = uuid::Uuid::new_v4();
+    match slugify(title) {
+        slug if slug.is_empty() => format!("{id}.{extension}"),
+        slug => format!("{id}_{slug}.{extension}"),
+    }
+}
+
+/// A title reduced to `[A-Za-z0-9_]`: Polish (and other common) diacritics folded
+/// onto their ASCII letter, every remaining run of anything else collapsed into a
+/// single underscore.
+fn slugify(title: &str) -> String {
+    let mut slug = String::new();
+    for c in title.chars() {
+        match fold_char(c) {
+            Some(folded) => slug.push_str(folded),
+            None if c.is_ascii_alphanumeric() => slug.push(c),
+            None => {
+                if !slug.ends_with('_') {
+                    slug.push('_');
+                }
+            }
+        }
+    }
+
+    let slug: String = slug.chars().take(MAX_SLUG_CHARS).collect();
+    slug.trim_matches('_').to_string()
+}
+
+/// Letters that keep their meaning as an ASCII letter. Polish first — that is
+/// what wavo's titles are full of — then the accented Latin letters a track title
+/// is otherwise likely to carry.
+fn fold_char(c: char) -> Option<&'static str> {
+    Some(match c {
+        'ą' => "a",
+        'Ą' => "A",
+        'ć' => "c",
+        'Ć' => "C",
+        'ę' => "e",
+        'Ę' => "E",
+        'ł' => "l",
+        'Ł' => "L",
+        'ń' => "n",
+        'Ń' => "N",
+        'ó' => "o",
+        'Ó' => "O",
+        'ś' => "s",
+        'Ś' => "S",
+        'ź' | 'ż' => "z",
+        'Ź' | 'Ż' => "Z",
+        'á' | 'à' | 'â' | 'ä' | 'ã' | 'å' => "a",
+        'Á' | 'À' | 'Â' | 'Ä' | 'Ã' | 'Å' => "A",
+        'æ' => "ae",
+        'Æ' => "AE",
+        'ç' => "c",
+        'Ç' => "C",
+        'é' | 'è' | 'ê' | 'ë' => "e",
+        'É' | 'È' | 'Ê' | 'Ë' => "E",
+        'í' | 'ì' | 'î' | 'ï' => "i",
+        'Í' | 'Ì' | 'Î' | 'Ï' => "I",
+        'ñ' => "n",
+        'Ñ' => "N",
+        'ò' | 'ô' | 'ö' | 'õ' | 'ø' => "o",
+        'Ò' | 'Ô' | 'Ö' | 'Õ' | 'Ø' => "O",
+        'ß' => "ss",
+        'ú' | 'ù' | 'û' | 'ü' => "u",
+        'Ú' | 'Ù' | 'Û' | 'Ü' => "U",
+        'ý' | 'ÿ' => "y",
+        'Ý' => "Y",
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,6 +358,55 @@ mod tests {
         assert_eq!(sanitize_title("", "song_vocals.mp3"), "song_vocals");
         assert_eq!(sanitize_title("   ", "song.mp3"), "song");
         assert_eq!(sanitize_title(&"a".repeat(500), "x.mp3").len(), 200);
+    }
+
+    #[test]
+    fn a_stored_name_is_a_uuid_and_a_normalized_title() {
+        let name = upload_filename("Kult — Arahja (bez wokalu)", "mp3");
+        let (id, rest) = name.split_once('_').unwrap();
+        assert_eq!(id.len(), 36, "{name} does not start with a uuid");
+        assert!(uuid::Uuid::parse_str(id).is_ok(), "{name}");
+        assert_eq!(rest, "Kult_Arahja_bez_wokalu.mp3");
+    }
+
+    #[test]
+    fn two_uploads_of_the_same_title_never_share_a_name() {
+        assert_ne!(
+            upload_filename("Queen — Bohemian Rhapsody (original)", "mp3"),
+            upload_filename("Queen — Bohemian Rhapsody (original)", "mp3")
+        );
+    }
+
+    #[test]
+    fn polish_letters_special_characters_and_spaces_are_normalized_away() {
+        assert_eq!(
+            slugify("Zażółć gęślą jaźń / Ćwierć ŁÓDŹ"),
+            "Zazolc_gesla_jazn_Cwierc_LODZ"
+        );
+        assert_eq!(slugify("  a  ///  b  "), "a_b");
+        assert_eq!(slugify("Björk – Jóga"), "Bjork_Joga");
+        assert!(slugify("Zazolc")
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_'));
+    }
+
+    #[test]
+    fn a_title_with_nothing_to_slugify_leaves_the_uuid_alone() {
+        let name = upload_filename("♪♫ ✧", "wav");
+        assert!(!name.contains('_'), "{name}");
+        assert!(name.ends_with(".wav"));
+        assert!(
+            uuid::Uuid::parse_str(name.trim_end_matches(".wav")).is_ok(),
+            "{name}"
+        );
+    }
+
+    #[test]
+    fn a_very_long_title_is_cut_short() {
+        let slug = slugify(&"ą".repeat(500));
+        assert_eq!(slug.chars().count(), MAX_SLUG_CHARS);
+        // The whole name still fits comfortably inside a filesystem's limit.
+        assert!(upload_filename(&"very long title ".repeat(50), "mp3").len() < 255);
     }
 
     #[test]

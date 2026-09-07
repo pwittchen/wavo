@@ -45,7 +45,22 @@ async fn a_successful_upload_returns_the_track_and_carries_the_token() {
         Some("Bearer plainsong-token")
     );
     assert!(requests[0].body.contains("name=\"title\""));
-    assert!(requests[0].body.contains("filename=\"song_vocals.mp3\""));
+    // The stored name is unique per upload, not demix's `song_vocals.mp3`, which
+    // every run of the same stem would produce again (§7).
+    assert!(!requests[0].body.contains("filename=\"song_vocals.mp3\""));
+    let stored = stored_filename(&requests[0].body);
+    let (id, rest) = stored.split_once('_').unwrap();
+    assert!(uuid::Uuid::parse_str(id).is_ok(), "{stored}");
+    assert_eq!(rest, "Vocals.mp3");
+}
+
+/// The `filename=` of the `file` part of a multipart body.
+fn stored_filename(body: &str) -> String {
+    body.split("filename=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[tokio::test]
