@@ -609,6 +609,15 @@ fn is_log_noise(line: &str) -> bool {
         }
     }
     let lower = line.to_lowercase();
+    // pytubefix — the fallback downloader demix tries after yt-dlp — logs
+    // through `logging`, so its warnings arrive with no level prefix at all.
+    // `Unable to run botGuard. Skipping poToken generation …` is printed before
+    // the download is even attempted, so it is the first line of stderr of every
+    // fallback attempt; left in, it became the "detail" of failures it had
+    // nothing to do with.
+    if lower.contains("unable to run botguard") || lower.contains("skipping potoken generation") {
+        return true;
+    }
     // Python's `warnings` module, and TensorFlow's chatter under it.
     lower.starts_with("warning:") || (lower.contains("warning:") && lower.contains(".py:"))
 }
@@ -781,6 +790,34 @@ mod tests {
             classify_demix_error("[download] Destination: video.webm", &stderr),
             DemixFailure::Other("ERROR: unable to download webpage: timed out".to_string())
         );
+    }
+
+    /// pytubefix prints this, unprefixed, whenever it runs without `node`.
+    const BOTGUARD_WARNING: &str = "Unable to run botGuard. Skipping poToken generation, \
+                                    reason: Node.js is required but not found. Tried path: node";
+
+    #[test]
+    fn the_botguard_warning_is_never_reported_as_the_failure() {
+        // What a container with no JavaScript runtime actually produced: the
+        // warning opened stderr, so it became the user's "Processing failed: …".
+        let stderr = format!(
+            "{BOTGUARD_WARNING}\n\
+             ERROR: unable to download video data: HTTP Error 403: Forbidden\n\
+             All download strategies failed"
+        );
+        assert_eq!(
+            classify_demix_error("", &stderr),
+            DemixFailure::YoutubeBlocked
+        );
+        for lang in [Lang::En, Lang::Pl] {
+            assert!(!DemixFailure::YoutubeBlocked
+                .message(lang)
+                .contains("botGuard"));
+        }
+
+        // And with nothing else to go on it still does not reach the user.
+        let failure = classify_demix_error("", BOTGUARD_WARNING);
+        assert_eq!(failure, DemixFailure::Other(String::new()));
     }
 
     #[test]

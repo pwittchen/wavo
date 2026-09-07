@@ -567,6 +567,10 @@ Multi-stage:
    - `python3.10` (default in 22.04) → virtualenv `/opt/venv-mcp` with `demix-mcp`
    - `python3.8` (deadsnakes PPA) → virtualenv `/opt/venv-demix` with `demix`
    - `ffmpeg`, `yt-dlp`, `ca-certificates`
+   - `node`, for YouTube's JavaScript challenge: yt-dlp needs a runtime for the
+     signature and pytubefix runs botGuard on Node by name for the PO token.
+     `/etc/yt-dlp.conf` carries `--js-runtimes node`, since yt-dlp enables `deno`
+     alone by default.
    - `PATH=/opt/venv-demix/bin:/opt/venv-mcp/bin:$PATH`, so `demix-mcp` finds `demix`
    - The `wavo` binary at `/usr/local/bin/wavo`
    - Runs as unprivileged user `wavo` (uid `10001`), owning `/work`
@@ -598,6 +602,9 @@ Before the first poll, wavo verifies and fails loudly on: required env vars pres
 `initialize` + `tools/list` succeed and contain `process_audio`; plainsong reachable
 (`GET /api/tracks`) and the token accepted (a `HEAD`-equivalent probe); Telegram
 `getMe` succeeds. Each failure names the variable or binary at fault.
+
+A missing JavaScript runtime (`node`) is logged as a warning, not a failure: it
+costs YouTube downloads, but an uploaded file never goes near YouTube.
 
 ### 10.4 Compose
 

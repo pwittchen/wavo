@@ -239,6 +239,8 @@ async fn report_downloader() {
         Err(e) => tracing::warn!(error = %e, "cannot run `yt-dlp --version`"),
     }
 
+    report_js_runtime();
+
     let args = std::env::var("DEMIX_YT_DLP_ARGS").unwrap_or_default();
     if args.trim().is_empty() {
         return;
@@ -269,6 +271,30 @@ async fn report_downloader() {
                  YouTube downloads will behave as if there were no cookies"
             ),
         }
+    }
+}
+
+/// Say whether a JavaScript runtime is around, once, at startup.
+///
+/// YouTube's player hands out a JavaScript challenge, and both downloaders demix
+/// tries need a runtime to answer it: yt-dlp for the signature (the image points
+/// it at Node through `/etc/yt-dlp.conf`, because yt-dlp enables only `deno` by
+/// name), and its pytubefix fallback for botGuard, which wants Node in
+/// particular. Without one, downloads fail with the same 403 as a stale yt-dlp
+/// or a datacenter IP does — this is the third cause, and the log is the only
+/// place it can be told apart. Not fatal: uploaded files never go near YouTube.
+fn report_js_runtime() {
+    match (which("node"), which("deno")) {
+        (Some(path), _) => tracing::info!(path = %path.display(), "JavaScript runtime: node"),
+        (None, Some(path)) => tracing::warn!(
+            path = %path.display(),
+            "only `deno` is on PATH: yt-dlp can use it, but demix's pytubefix \
+             fallback runs botGuard on `node` alone and will skip its PO token"
+        ),
+        (None, None) => tracing::warn!(
+            "no JavaScript runtime on PATH (`node`): YouTube's player challenge \
+             cannot be answered and downloads will fail as though blocked"
+        ),
     }
 }
 
