@@ -71,9 +71,11 @@ INFO wavo::telegram: ignored a message from a chat that is not allowed chat_id=1
 > published for `linux/amd64` only, because essentia — demix's key detection —
 > has no `linux/aarch64` wheel. On Apple Silicon it runs under Rosetta, and
 > speed is not the problem — a 4-minute 2-stem separation measures ~13 s — but
-> memory is: 4 stems on a full-length track needs more than Docker Desktop's
-> default 8 GB VM and is OOM-killed. Pin `platform: linux/amd64` on both
-> services in a `docker-compose.override.yml` and give the VM 12 GB or more.
+> memory is. That is not a Rosetta artefact: spleeter's footprint grows with
+> track length on every platform (see *sizing the machine* below), and 4 stems
+> on a full-length track exceeds Docker Desktop's default 8 GB VM and is
+> OOM-killed. Pin `platform: linux/amd64` on both services in a
+> `docker-compose.override.yml` and give the VM 16 GB.
 > The first separation downloads ~300 MB of spleeter models into the
 > `wavo-work` volume, where they stay.
 
@@ -210,10 +212,45 @@ long-polled outbound.
 Pick an **amd64** machine: essentia, which demix uses for key detection, has
 never published a `linux/aarch64` wheel, so that is the only platform published
 and an arm64 VPS could run the image only under emulation, which is too slow to
-be useful. Two cores, 4 GB of
-RAM and 20 GB of disk is a comfortable floor — the image is 2–3 GB, the spleeter
-models another ~300 MB in the `wavo-work` volume, and separating a normal-length
-song peaks around 2 GB of RAM.
+be useful.
+
+### sizing the machine
+
+Disk is the easy part: 20 GB is a comfortable floor, since the image is 2–3 GB
+and the spleeter models another ~300 MB in the `wavo-work` volume.
+
+RAM is where a VPS gets sized wrong, because separation has no fixed cost.
+Spleeter loads the whole track as float32 and holds a complex STFT plus one mask
+per stem, so peak memory grows linearly with track length *and* stem count:
+
+| track length | `2stems` | `4stems` |
+|--------------|----------|----------|
+| 4 min | 4.45 GB | 7.41 GB |
+| 8 min | 7.86 GB | 11.72 GB |
+| 10 min | 10.34 GB | 14.08 GB |
+
+Measured peak RSS of the spleeter process; demix's README carries the full table
+and the per-minute formula. Ten minutes is also the worst case — spleeter's `-d`
+defaults to 600 s, so longer tracks are truncated rather than scaled up.
+
+So: **8 GB for 2-stem work, 16 GB if 4 stems should always succeed.** Add
+whatever else the box runs on top; a co-tenant service holding a gigabyte moves
+the answer up a tier. Two cores is a floor rather than a target — spleeter is
+thread-hungry, and on a single vCPU a separation that takes seconds on a laptop
+takes minutes.
+
+Two things make a bad day less bad, and neither costs anything:
+
+- **Give the box swap.** Without it, exceeding RAM is an instant OOM kill rather
+  than a slow job, and on a small machine the reclaim thrashing beforehand can
+  take the whole host unresponsive with it.
+- **Put `mem_limit` on the wavo service.** Otherwise the kernel picks the OOM
+  victim, and it need not pick wavo — on a shared box it may kill a neighbour
+  instead.
+
+`WAVO_MAX_CONCURRENT_JOBS` stays at `1` unless the machine has both the cores
+and a multiple of the table above in RAM; the semaphore in `jobs.rs` exists for
+exactly this reason.
 
 ### a public name for plainsong
 
