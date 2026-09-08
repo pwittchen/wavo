@@ -403,6 +403,16 @@ into the history:
 - The `files` map is reduced to audio files only (`.mp3`, `.wav`, `.flac`), with the
   paths made relative to the job directory. Video files are dropped unless the request
   asked for video.
+- A `process_audio` run whose source was a YouTube URL comes back with the song's
+  names added: `title` (the video's own title), plus `artist` and `track` when YouTube
+  carries music metadata for it. demix reports a title only for a source it resolved
+  from a *search*, so without this a bare link leaves the model with nothing to name
+  the track with and plainsong stores an "Unknown artist" (§7). wavo asks `yt-dlp`
+  (`--dump-single-json --skip-download`, the same proxy as the download, §9) once the
+  run has succeeded; a lookup that fails or times out is a `warn` log and nothing else
+  — an unnamed track is a worse title, not a failed turn. The names are facts for the
+  model to compose a title from, never a title: splitting `Queen - Bohemian Rhapsody
+  (Official Video)` into a performer and a song is the model's job.
 - The absolute-path table is kept **outside** the model's context, in the turn state,
   keyed by the relative path the model sees. `publish_track` resolves through that
   table, so the model can never name a path wavo did not produce.
@@ -446,6 +456,8 @@ directory.
 - Status handling: `401`/`403` → an operator-facing log line about the token plus a
   generic user message; `413` → the size message above; `415` → "that file type isn't
   accepted"; `5xx` → one retry after 2 s, then give up.
+- The parts come from what the user said, from the search result, or — for a bare
+  YouTube link — from what YouTube says the video is called (§6.4).
 - Titles are supplied by the model in three parts and **composed by wavo**, the way the
   links block is (§5.4): `Artist — Title (modification)`, where the modification says
   what was done to that file ("bez wokalu", "vocals removed", "zwolnione do 80%") in the
@@ -565,10 +577,11 @@ a single clear message naming the missing variable.
 | `WAVO_PROXY_PASSWORD` | — | | Proxy password; redacted like every other secret |
 
 The proxy exists because YouTube distrusts datacenter IP ranges (§8.2), so it covers
-**downloads only**: it is set on the `demix-mcp` child's environment
-(`HTTP_PROXY`/`HTTPS_PROXY`, both spellings — yt-dlp's urllib and the pytubefix
-fallback's requests each read one), and wavo's own calls to Telegram, the LLM provider
-and plainsong are unaffected. The credentials travel in the child's environment rather
+**what talks to YouTube and nothing else**: it is set on the environment of the
+`demix-mcp` child and of the `yt-dlp` wavo runs to find out what a link is called
+(§6.4) — `HTTP_PROXY`/`HTTPS_PROXY`, both spellings, since yt-dlp's urllib and the
+pytubefix fallback's requests each read one — and wavo's own calls to Telegram, the LLM
+provider and plainsong are unaffected. The credentials travel in the child's environment rather
 than in `DEMIX_YT_DLP_ARGS` so they cannot appear on a command line demix echoes into
 its stderr, which wavo reads back. With the flag off the other four variables are
 ignored entirely and the child inherits whatever proxy environment the host set; with it
@@ -698,6 +711,7 @@ wavo/
       mod.rs           # dispatch table (MCP tools + native tools)
       publish.rs       # publish_track, path guard
       plainsong.rs     # REST client
+      youtube.rs       # what a link is called, via yt-dlp
     session.rs         # per-chat history and trimming
     jobs.rs            # job dirs, semaphore, progress reporting, cleanup
     health.rs          # /healthz
@@ -756,7 +770,7 @@ wavo/
 | Level | What |
 | --- | --- |
 | Unit | MCP→OpenAI schema conversion (including the `cwd`/`output_dir` strip); path guard against traversal, symlinks and absolute paths; tool-output truncation; history trimming; Telegram HTML escaping; error classification (§8.2) against captured demix stderr samples; the `Lang` lookup — every wavo-composed string exists in both variants and falls back to English when the language is unknown |
-| Integration | The LLM loop against a stub HTTP server replaying scripted tool calls — covers budgets, escalation, malformed arguments and cancellation; the plainsong client against a stub returning `401`/`413`/`415`/`5xx`; the MCP layer against a stub MCP server binary, including a child that exits mid-call |
+| Integration | The LLM loop against a stub HTTP server replaying scripted tool calls — covers budgets, escalation, malformed arguments and cancellation; the plainsong client against a stub returning `401`/`413`/`415`/`5xx`; the MCP layer against a stub MCP server binary, including a child that exits mid-call; the song-name lookup against a stub `yt-dlp` — its JSON, a refused lookup, a missing binary and the proxy the child inherits |
 | End-to-end | `#[ignore]`d test driving a real compose stack with a short local audio file: process → publish → assert the track is listed by `GET /api/tracks` and reachable at its stream URL |
 | CI | `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `docker build` (the e2e test is not run in CI — it needs the models and network) |
 

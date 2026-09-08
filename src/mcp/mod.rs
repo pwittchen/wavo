@@ -210,10 +210,11 @@ impl McpClient {
     }
 }
 
-/// The proxy environment the demix child is started with, empty when no proxy
-/// is configured — in which case whatever `HTTP_PROXY` the host set is inherited
-/// as it always was, since wavo has no business overriding it.
-fn proxy_env(proxy: Option<&Proxy>) -> Vec<(&'static str, Secret)> {
+/// The proxy environment a child that fetches from YouTube is started with —
+/// the demix server here, the song-name lookup in `tools::youtube` — empty when
+/// no proxy is configured, in which case whatever `HTTP_PROXY` the host set is
+/// inherited as it always was, since wavo has no business overriding it.
+pub(crate) fn proxy_env(proxy: Option<&Proxy>) -> Vec<(&'static str, Secret)> {
     let Some(proxy) = proxy else {
         return Vec::new();
     };

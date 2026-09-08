@@ -63,10 +63,18 @@ Things that are not obvious from a single file:
   `Err`: a failure is `{"ok": false, "error": …}` so the model can correct
   itself. demix stderr is classified by `classify_demix_error` into a
   human sentence; the raw output only goes to the log.
-- **The proxy is the child's, not wavo's.** `WAVO_ENABLE_PROXY` (§9) puts
-  `HTTP_PROXY`/`HTTPS_PROXY` on the `demix-mcp` child's environment in
-  `mcp/mod.rs` and nowhere else, so it moves YouTube downloads and leaves
-  Telegram, OpenAI and plainsong direct. The credentials go through the
+- **A bare link is named by wavo, not guessed by the model.** `process_audio`
+  answers a URL with files and no metadata, so `tools/youtube.rs` asks `yt-dlp`
+  what the video is called after a successful run and adds `title` (plus
+  `artist`/`track` when YouTube has music metadata) to the reduced result — the
+  facts the model composes `publish_track`'s three parts from (§6.4, §7). The
+  lookup is a trait (`SongNameLookup`) so tests never reach YouTube, and a
+  failed lookup is a log line, not a failed turn.
+- **The proxy belongs to whatever talks to YouTube.** `WAVO_ENABLE_PROXY` (§9)
+  puts `HTTP_PROXY`/`HTTPS_PROXY` on the `demix-mcp` child's environment in
+  `mcp/mod.rs` and on the song-name `yt-dlp` in `tools/youtube.rs`, and nowhere
+  else, so it moves YouTube traffic and leaves Telegram, OpenAI and plainsong
+  direct. The credentials go through the
   environment rather than `DEMIX_YT_DLP_ARGS` on purpose: demix's stderr is read
   back into the log, and a command line would carry the password into it.
 - **wavo composes its own links.** Track and listing URLs are appended after the
@@ -89,8 +97,9 @@ Things that are not obvious from a single file:
 
 No test may call the real OpenAI API, the real Telegram API or YouTube. The MCP
 layer is tested against `tests/fixtures/stub_mcp_server.py` (which can also die
-mid-call, for the restart policy) and HTTP clients against a stub server in
-`tests/support`. MCP-backed tests no-op when `python3` is missing, so a green
+mid-call, for the restart policy), the song-name lookup against
+`tests/fixtures/stub_yt_dlp.py`, and HTTP clients against a stub server in
+`tests/support`. Python-backed tests no-op when `python3` is missing, so a green
 run on a machine without it proves less than it looks — keep `python3`
 available.
 

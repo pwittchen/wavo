@@ -11,7 +11,7 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use support::{test_config, StubHttp};
+use support::{test_config, ScriptedNames, StubHttp};
 use wavo::config::Config;
 use wavo::jobs::JobManager;
 use wavo::mcp::McpClient;
@@ -34,13 +34,32 @@ struct Harness {
     tools: Tools,
     ctx: TurnCtx,
     jobs: Arc<JobManager>,
+    names: Arc<ScriptedNames>,
     _work: tempfile::TempDir,
     _plainsong_stub: StubHttp,
 }
 
+/// The default harness: YouTube, had it been asked, would have named the video.
 async fn harness(
     config: impl FnOnce(&mut Config),
     plainsong_responses: Vec<(u16, &str)>,
+) -> Harness {
+    harness_named(
+        config,
+        plainsong_responses,
+        ScriptedNames::named(
+            "Queen - Bohemian Rhapsody (Official Video Remastered)",
+            Some("Queen"),
+            Some("Bohemian Rhapsody"),
+        ),
+    )
+    .await
+}
+
+async fn harness_named(
+    config: impl FnOnce(&mut Config),
+    plainsong_responses: Vec<(u16, &str)>,
+    names: ScriptedNames,
 ) -> Harness {
     let work = tempfile::tempdir().unwrap();
     let mut cfg = test_config(work.path().to_path_buf());
@@ -65,12 +84,16 @@ async fn harness(
         cfg.max_concurrent_jobs,
         cfg.keep_job_files,
     ));
-    let tools = Tools::new(mcp, plainsong, jobs.clone(), &cfg).await;
+    let names = Arc::new(names);
+    let tools = Tools::new(mcp, plainsong, jobs.clone(), &cfg)
+        .await
+        .with_song_names(names.clone());
 
     Harness {
         tools,
         ctx: TurnCtx::new(42, Uuid::new_v4(), Lang::En, CancellationToken::new(), None),
         jobs,
+        names,
         _work: work,
         _plainsong_stub: stub,
     }
@@ -207,6 +230,76 @@ async fn a_youtube_link_reaches_demix_untouched() {
 
     let job_dir = only_job_dir(&h.jobs);
     assert!(job_dir.starts_with(h.jobs.jobs_dir()));
+}
+
+/// A link says nothing about the song, and demix answers one with files only.
+/// So wavo asks YouTube, and the model gets a name to publish under instead of
+/// "Unknown artist" (§7).
+#[tokio::test]
+async fn a_link_comes_back_with_the_song_youtube_says_it_is() {
+    if !python3_available() {
+        return;
+    }
+    let h = harness(|_| {}, vec![(200, "[]")]).await;
+    let link = "https://youtu.be/fJ9rUzIMcZQ";
+
+    let result = h
+        .tools
+        .call(&h.ctx, "process_audio", json!({"url": link}))
+        .await;
+
+    assert_eq!(h.names.lookups().await, vec![link.to_string()]);
+    assert_eq!(
+        result["title"],
+        "Queen - Bohemian Rhapsody (Official Video Remastered)"
+    );
+    assert_eq!(result["artist"], "Queen");
+    assert_eq!(result["track"], "Bohemian Rhapsody");
+}
+
+/// Nothing else is asked about: a search carries demix's own title in its
+/// output, a local file has no video behind it, and a link that is not
+/// YouTube's is not YouTube's to answer for.
+#[tokio::test]
+async fn only_a_youtube_link_is_looked_up() {
+    if !python3_available() {
+        return;
+    }
+    let h = harness(|_| {}, vec![(200, "[]")]).await;
+
+    for arguments in [
+        json!({"search": "Queen - Bohemian Rhapsody"}),
+        json!({"url": "https://example.com/song.mp3"}),
+    ] {
+        let result = h.tools.call(&h.ctx, "process_audio", arguments).await;
+        assert_eq!(result["ok"], true);
+        assert_eq!(result.get("title"), None, "a name was invented for it");
+    }
+    assert!(h.names.lookups().await.is_empty());
+}
+
+/// A lookup YouTube refuses is not a failed turn: the file is still there, and
+/// the model still has whatever the user's own message said about the song.
+#[tokio::test]
+async fn a_link_youtube_will_not_name_is_still_processed() {
+    if !python3_available() {
+        return;
+    }
+    let h = harness_named(|_| {}, vec![(200, "[]")], ScriptedNames::silent()).await;
+    let link = "https://www.youtube.com/watch?v=fJ9rUzIMcZQ";
+
+    let result = h
+        .tools
+        .call(&h.ctx, "process_audio", json!({"url": link}))
+        .await;
+
+    assert_eq!(h.names.lookups().await, vec![link.to_string()]);
+    assert_eq!(result["ok"], true);
+    assert_eq!(result.get("title"), None);
+    assert_eq!(
+        result["files"][0], "music/mp3/song_accompaniment.mp3",
+        "the run's output was lost with the name"
+    );
 }
 
 #[tokio::test]

@@ -8,6 +8,7 @@
 
 pub mod plainsong;
 pub mod publish;
+pub mod youtube;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -29,6 +30,7 @@ use crate::session::PublishedTrack;
 use crate::telegram::format::{t, t_detail, t_n, t_name, truncate_middle, Lang, Msg};
 use crate::tools::plainsong::{is_audio_file, PlainsongClient};
 use crate::tools::publish::{compose_track_title, resolve_publish_path};
+use crate::tools::youtube::{is_youtube_url, SongNameLookup, YtDlp};
 
 /// Everything one turn accumulates: the paths the model is allowed to name, the
 /// tracks it published, and the directories to clean up afterwards.
@@ -109,6 +111,8 @@ pub struct Tools {
     /// The *original* MCP schemas, kept so wavo knows which tools take the
     /// arguments it injects.
     mcp_schemas: HashMap<String, Value>,
+    /// Who to ask what a YouTube link is called (§7).
+    song_names: Arc<dyn SongNameLookup>,
     tool_output_chars: usize,
     job_timeout: Duration,
     work_dir: PathBuf,
@@ -201,11 +205,19 @@ impl Tools {
             jobs,
             catalogue,
             mcp_schemas,
+            song_names: Arc::new(YtDlp::new("yt-dlp", config.proxy.clone())),
             tool_output_chars: config.tool_output_chars,
             job_timeout: config.job_timeout,
             work_dir: config.work_dir.clone(),
             allow_delete: config.allow_delete,
         }
+    }
+
+    /// Ask something other than yt-dlp what a link is called. The tests are the
+    /// caller: none of them may reach YouTube (§14).
+    pub fn with_song_names(mut self, lookup: Arc<dyn SongNameLookup>) -> Self {
+        self.song_names = lookup;
+        self
     }
 
     async fn call_mcp(
@@ -256,6 +268,13 @@ impl Tools {
             arguments.insert("cwd".to_string(), json!(self.work_dir.to_string_lossy()));
         }
 
+        // Kept before the arguments are handed over: what the run was asked to
+        // fetch is what wavo asks YouTube about afterwards (§7).
+        let source_url = arguments
+            .get("url")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
         let long_running = name == "process_audio";
         let _permit = if long_running {
             Some(self.jobs.acquire(ctx.progress.as_deref()).await)
@@ -291,7 +310,53 @@ impl Tools {
             }
         };
 
-        self.reduce_result(ctx, name, value, job_dir).await
+        let mut reduced = self.reduce_result(ctx, name, value, job_dir).await;
+        self.name_the_source(ctx, &mut reduced, source_url.as_deref())
+            .await;
+        reduced
+    }
+
+    /// Tell the model what the video it just processed is called (§7).
+    ///
+    /// Only for a YouTube link, and only when the result named nothing itself:
+    /// a run demix resolved from a `search` already carries its title, and a
+    /// local file has none to look up. It happens after the run, so a job that
+    /// failed costs no lookup — and one that succeeded has already proved the
+    /// video is reachable.
+    async fn name_the_source(&self, ctx: &TurnCtx, reduced: &mut Value, url: Option<&str>) {
+        let Some(url) = url.filter(|url| is_youtube_url(url)) else {
+            return;
+        };
+        let Some(object) = reduced.as_object_mut() else {
+            return;
+        };
+        if object.get("ok") != Some(&Value::Bool(true)) || object.contains_key("title") {
+            return;
+        }
+
+        let Some(names) = self.song_names.lookup(url).await else {
+            // Not an error the user hears about: the model still has whatever
+            // the request itself said about the song.
+            tracing::info!(
+                chat_id = ctx.chat_id,
+                "YouTube did not say what this video is called"
+            );
+            return;
+        };
+        tracing::info!(
+            chat_id = ctx.chat_id,
+            title = %names.title,
+            artist = names.artist.as_deref().unwrap_or("—"),
+            "named the source from YouTube"
+        );
+
+        object.insert("title".to_string(), json!(names.title));
+        if let Some(artist) = names.artist {
+            object.insert("artist".to_string(), json!(artist));
+        }
+        if let Some(track) = names.track {
+            object.insert("track".to_string(), json!(track));
+        }
     }
 
     /// Shrink a demix result to what is useful to a language model, and keep the

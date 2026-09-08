@@ -98,6 +98,12 @@ their usual shapes work — `youtube.com/watch?v=…`, `youtu.be/…`,
 and the link is handed to demix (and from there to yt-dlp) exactly as you sent
 it, with no YouTube search in between.
 
+A link on its own still gets a proper title. Once the run is done, wavo asks
+YouTube what the video is called and hands the answer to the model, which takes
+the performer and the song out of it — so the track lands in plainsong as
+*Queen — Bohemian Rhapsody (bez wokalu)* rather than *Unknown artist*. If you
+name the song yourself, what you wrote wins.
+
 You do not have to fit it all into one message. A message that is only half a
 request — just a link, just a song title, just *"usuń wokal"* — waits about
 15 seconds (`WAVO_COALESCE_WINDOW_SEC`) for the rest, in either order:
@@ -335,9 +341,10 @@ WAVO_PROXY_PASSWORD=your-proxy-password
 Then `docker compose up -d`. With `WAVO_ENABLE_PROXY=false` — the default — the
 other four are ignored entirely, so they can stay in `.env` between the times
 they help; with it true, a missing host or port is a startup failure. The proxy
-carries the demix side and nothing else: Telegram, OpenAI and plainsong are
-still reached direct. What crosses it is the audio, plus the one-off ~300 MB
-spleeter model download if the `wavo-work` volume is still empty. wavo names
+carries what talks to YouTube and nothing else: Telegram, OpenAI and plainsong
+are still reached direct. What crosses it is the audio, the few kilobytes wavo
+spends asking what a link is called, plus the one-off ~300 MB spleeter model
+download if the `wavo-work` volume is still empty. wavo names
 the proxy in its startup log (with the password taken out) and opens a socket to
 it, so a proxy that is not answering says so there:
 
@@ -417,7 +424,7 @@ YouTube.
 | `src/telegram/` | long polling, commands, coalescing half-requests, HTML escaping, the bilingual string table |
 | `src/llm/` | chat completions, the tool-calling loop, the system prompt |
 | `src/mcp/` | the `demix-mcp` child process, tool discovery, schema conversion |
-| `src/tools/` | the dispatch table, the plainsong client, the path guard |
+| `src/tools/` | the dispatch table, the plainsong client, the path guard, the song-name lookup |
 | `src/session.rs` | per-chat history and trimming |
 | `src/jobs.rs` | job directories, the concurrency permit, progress messages |
 
@@ -437,6 +444,9 @@ Three rules are worth knowing when reading it:
   `Artist — Title (modification)`, with the modification in the user's language;
   a part the model left out gets a localized placeholder, so a title in the
   music storage always names the performer, the song and what was done to it.
+  For a bare link there is nothing to compose from, so wavo asks yt-dlp what the
+  video is called and adds that to the tool result — a fact for the model to
+  split, not a title.
 
 ## where this deviates from SPEC.md
 
@@ -459,9 +469,9 @@ Three rules are worth knowing when reading it:
   master, so a server needs the compose file and an `.env` and nothing else; a
   local build is the `docker-compose.override.yml` the same section already
   prescribes for plainsong.
-- **Two extra test files.** `tests/plainsong_client.rs`, `tests/mcp_client.rs`
-  and `tests/tool_dispatch.rs` cover the integration level §14 asks for but the
-  layout in §11 does not list.
+- **Four extra test files.** `tests/plainsong_client.rs`, `tests/mcp_client.rs`,
+  `tests/tool_dispatch.rs` and `tests/youtube_lookup.rs` cover the integration
+  level §14 asks for but the layout in §11 does not list.
 
 ## license
 

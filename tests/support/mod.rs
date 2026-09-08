@@ -310,3 +310,47 @@ impl ToolBox for ScriptedTools {
             .unwrap_or_else(|| json!({"ok": true}))
     }
 }
+
+// --- a scriptable song-name lookup -------------------------------------------
+
+/// Stands in for the `yt-dlp` call that asks YouTube what a link is called: no
+/// test may reach YouTube, and every test that processes a link goes through
+/// this instead.
+pub struct ScriptedNames {
+    answer: Option<wavo::tools::youtube::SongNames>,
+    lookups: Mutex<Vec<String>>,
+}
+
+impl ScriptedNames {
+    /// A lookup that answers with a performer, a song and a video title.
+    pub fn named(title: &str, artist: Option<&str>, track: Option<&str>) -> Self {
+        Self {
+            answer: Some(wavo::tools::youtube::SongNames {
+                title: title.to_string(),
+                artist: artist.map(str::to_string),
+                track: track.map(str::to_string),
+            }),
+            lookups: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// A lookup that comes back with nothing, the way a blocked one does.
+    pub fn silent() -> Self {
+        Self {
+            answer: None,
+            lookups: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub async fn lookups(&self) -> Vec<String> {
+        self.lookups.lock().await.clone()
+    }
+}
+
+#[async_trait]
+impl wavo::tools::youtube::SongNameLookup for ScriptedNames {
+    async fn lookup(&self, url: &str) -> Option<wavo::tools::youtube::SongNames> {
+        self.lookups.lock().await.push(url.to_string());
+        self.answer.clone()
+    }
+}
