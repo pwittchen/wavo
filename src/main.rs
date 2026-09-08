@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use tokio_util::sync::CancellationToken;
 
-use wavo::config::Config;
+use wavo::config::{Config, Proxy};
 use wavo::health::{self, Health};
 use wavo::jobs::{JobManager, ORPHAN_MAX_AGE};
 use wavo::llm::openai::OpenAi;
@@ -54,7 +54,7 @@ async fn run() -> anyhow::Result<()> {
 
     check_work_dir(&config.work_dir).await?;
     check_binaries(&config)?;
-    report_downloader().await;
+    report_downloader(&config).await;
 
     let telegram = Telegram::new(&config.telegram_api_base, &config.telegram_token);
     let username = telegram
@@ -82,7 +82,7 @@ async fn run() -> anyhow::Result<()> {
     tracing::info!(url = %config.plainsong_url, "plainsong reachable and token accepted");
 
     let mcp = Arc::new(
-        McpClient::connect(&config.mcp_command, &config.work_dir)
+        McpClient::connect(&config.mcp_command, &config.work_dir, config.proxy.clone())
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?,
     );
@@ -212,15 +212,17 @@ fn check_binaries(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Say which yt-dlp is installed and what demix will pass it, once, at startup.
+/// Say which yt-dlp is installed, what demix will pass it and which proxy it
+/// goes out through, once, at startup.
 ///
-/// Neither is fatal, and neither is visible anywhere else: the version is baked
-/// into the image (the Dockerfile's `YT_DLP_VERSION`) and `DEMIX_YT_DLP_ARGS` is
-/// read by demix, not by wavo. But between them they answer nearly every report
-/// of "YouTube blocked the download" (§8.2) — a stale yt-dlp, or a cookies file
-/// that the container cannot read — and guessing at those from the outside
-/// costs a deployment round trip.
-async fn report_downloader() {
+/// None of it is fatal, and none of it is visible anywhere else: the version is
+/// baked into the image (the Dockerfile's `YT_DLP_VERSION`), `DEMIX_YT_DLP_ARGS`
+/// is read by demix, not by wavo, and the proxy only ever appears in the demix
+/// child's environment. But between them they answer nearly every report of
+/// "YouTube blocked the download" (§8.2) — a stale yt-dlp, a cookies file the
+/// container cannot read, a proxy that is not answering — and guessing at those
+/// from the outside costs a deployment round trip.
+async fn report_downloader(config: &Config) {
     match tokio::process::Command::new("yt-dlp")
         .arg("--version")
         .output()
@@ -238,6 +240,8 @@ async fn report_downloader() {
         ),
         Err(e) => tracing::warn!(error = %e, "cannot run `yt-dlp --version`"),
     }
+
+    report_proxy(config.proxy.as_ref()).await;
 
     let args = std::env::var("DEMIX_YT_DLP_ARGS").unwrap_or_default();
     if args.trim().is_empty() {
@@ -269,6 +273,47 @@ async fn report_downloader() {
                  YouTube downloads will behave as if there were no cookies"
             ),
         }
+    }
+}
+
+/// How long the startup proxy probe waits before saying nothing answered.
+const PROXY_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Name the proxy downloads go through, and open a socket to it to find out
+/// whether it is there at all.
+///
+/// A warning, never a startup failure: a proxy that is briefly down is a reason
+/// for downloads to fail, not a reason for the bot to stop answering `/status`.
+/// The probe is a bare TCP connect, so it costs the operator no proxy traffic
+/// and proves nothing about the credentials — a wrong password looks exactly
+/// like a healthy proxy here, and shows up as a 407 in demix's output later.
+async fn report_proxy(proxy: Option<&Proxy>) {
+    let Some(proxy) = proxy else {
+        return;
+    };
+    tracing::info!(
+        proxy = %proxy.redacted(),
+        "downloads go through a proxy (WAVO_ENABLE_PROXY=true)"
+    );
+
+    let endpoint = proxy.endpoint();
+    match tokio::time::timeout(
+        PROXY_PROBE_TIMEOUT,
+        tokio::net::TcpStream::connect(&endpoint),
+    )
+    .await
+    {
+        Ok(Ok(_)) => tracing::info!(proxy = %endpoint, "proxy accepted a connection"),
+        Ok(Err(e)) => tracing::warn!(
+            proxy = %endpoint,
+            error = %e,
+            "the configured proxy did not accept a connection; downloads will fail while it does not"
+        ),
+        Err(_) => tracing::warn!(
+            proxy = %endpoint,
+            "the configured proxy did not answer within {}s; downloads will be slow or fail",
+            PROXY_PROBE_TIMEOUT.as_secs()
+        ),
     }
 }
 

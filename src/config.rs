@@ -36,6 +36,92 @@ impl fmt::Display for Secret {
     }
 }
 
+/// An outbound HTTP proxy for the downloader (§9). Off by default: only a
+/// deployment whose IP YouTube distrusts needs one, and every request through it
+/// costs the operator bandwidth. The fields are iproyal.com's four — any
+/// user:password HTTP proxy fits the same shape.
+#[derive(Debug, Clone)]
+pub struct Proxy {
+    pub host: String,
+    pub port: u16,
+    /// Optional as a pair with `password`: a proxy authenticated by IP needs
+    /// neither, and one that needs credentials needs both.
+    pub username: Option<String>,
+    pub password: Option<Secret>,
+}
+
+impl Proxy {
+    /// Fails the same way `from_env` does, so a half-configured proxy is a
+    /// startup failure naming the variable rather than a 407 hours later.
+    pub fn new(
+        host: String,
+        port: u16,
+        username: Option<String>,
+        password: Option<Secret>,
+    ) -> Result<Self, ConfigError> {
+        match (&username, &password) {
+            (Some(_), None) => return Err(ConfigError::Missing("WAVO_PROXY_PASSWORD")),
+            (None, Some(_)) => return Err(ConfigError::Missing("WAVO_PROXY_USERNAME")),
+            _ => {}
+        }
+        Ok(Self {
+            host,
+            port,
+            username,
+            password,
+        })
+    }
+
+    /// The proxy as `HTTP_PROXY` wants it. A `Secret`, because the credentials
+    /// are in it: it may be handed to a child process, never to a log line.
+    ///
+    /// The credentials are percent-encoded — iproyal passwords are generated and
+    /// can hold `@` or `:`, either of which would otherwise cut the URL in the
+    /// wrong place. urllib (yt-dlp) and requests (the pytubefix fallback) both
+    /// unquote them again before building the `Proxy-Authorization` header.
+    pub fn url(&self) -> Secret {
+        let credentials = match (&self.username, &self.password) {
+            (Some(user), Some(password)) => format!(
+                "{}:{}@",
+                encode_userinfo(user),
+                encode_userinfo(password.expose())
+            ),
+            _ => String::new(),
+        };
+        Secret::new(format!("http://{credentials}{}:{}", self.host, self.port))
+    }
+
+    /// The same URL with the password taken out, for the one startup log line
+    /// that says a proxy is in use.
+    pub fn redacted(&self) -> String {
+        let credentials = match &self.username {
+            Some(user) => format!("{user}:<redacted>@"),
+            None => String::new(),
+        };
+        format!("http://{credentials}{}:{}", self.host, self.port)
+    }
+
+    /// `host:port`, for the reachability probe at startup.
+    pub fn endpoint(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
+}
+
+/// Percent-encode everything outside RFC 3986's unreserved set, which is more
+/// than a userinfo field strictly requires and safe for all of it.
+fn encode_userinfo(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(byte as char)
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub telegram_token: Secret,
@@ -53,6 +139,10 @@ pub struct Config {
     pub plainsong_public_url: String,
     pub plainsong_token: Secret,
     pub plainsong_max_upload_mb: u64,
+
+    /// `None` unless `WAVO_ENABLE_PROXY=true`. Only the demix child sees it
+    /// (§9): wavo's own calls to Telegram, OpenAI and plainsong go out direct.
+    pub proxy: Option<Proxy>,
 
     pub work_dir: PathBuf,
     pub mcp_command: String,
@@ -103,6 +193,8 @@ impl Config {
             plainsong_public_url,
             plainsong_token: Secret::new(required("PLAINSONG_TOKEN")?),
             plainsong_max_upload_mb: parse("PLAINSONG_MAX_UPLOAD_MB", 100)?,
+
+            proxy: proxy()?,
 
             work_dir: PathBuf::from(string("WAVO_WORK_DIR", "/work")),
             mcp_command: string("WAVO_MCP_COMMAND", "demix-mcp"),
@@ -210,6 +302,36 @@ fn parse_boolean(value: &str) -> Option<bool> {
     }
 }
 
+/// The proxy is opt-in: with `WAVO_ENABLE_PROXY` unset or false the other four
+/// variables are ignored entirely, so a `.env` can keep credentials around
+/// between the times they are wanted. Switching it on without a host or a port
+/// is a startup failure — a proxy that silently is not one would show up as the
+/// same "YouTube blocked the download" it was meant to fix.
+fn proxy() -> Result<Option<Proxy>, ConfigError> {
+    if !boolean("WAVO_ENABLE_PROXY", false)? {
+        return Ok(None);
+    }
+    let host = required("WAVO_PROXY_HOST")?;
+    let raw = required("WAVO_PROXY_PORT")?;
+    let port = match raw.parse::<u16>() {
+        Ok(port) if port > 0 => port,
+        _ => {
+            return Err(ConfigError::Invalid {
+                var: "WAVO_PROXY_PORT",
+                value: raw,
+                reason: "expected a port number between 1 and 65535".to_string(),
+            })
+        }
+    };
+    Proxy::new(
+        host,
+        port,
+        var("WAVO_PROXY_USERNAME"),
+        var("WAVO_PROXY_PASSWORD").map(Secret::new),
+    )
+    .map(Some)
+}
+
 /// The allow-list is the only authentication wavo has, so an unset or unparseable
 /// value refuses to start rather than defaulting to "everyone" (§5.3).
 fn chat_ids(key: &'static str) -> Result<Vec<i64>, ConfigError> {
@@ -256,6 +378,58 @@ mod tests {
             assert_eq!(parse_boolean(raw), Some(false), "{raw}");
         }
         assert_eq!(parse_boolean("maybe"), None);
+    }
+
+    fn iproyal() -> Proxy {
+        Proxy::new(
+            "geo.iproyal.com".to_string(),
+            12321,
+            Some("wavo".to_string()),
+            Some(Secret::new("p@ss:word")),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_proxy_url_carries_its_credentials_percent_encoded() {
+        // `@` and `:` in a generated password would otherwise cut the URL in
+        // the wrong place.
+        assert_eq!(
+            iproyal().url().expose(),
+            "http://wavo:p%40ss%3Aword@geo.iproyal.com:12321"
+        );
+        assert_eq!(iproyal().endpoint(), "geo.iproyal.com:12321");
+    }
+
+    #[test]
+    fn a_proxy_without_credentials_is_a_bare_url() {
+        let proxy = Proxy::new("10.0.0.9".to_string(), 8080, None, None).unwrap();
+        assert_eq!(proxy.url().expose(), "http://10.0.0.9:8080");
+        assert_eq!(proxy.redacted(), "http://10.0.0.9:8080");
+    }
+
+    #[test]
+    fn the_password_never_reaches_a_log_line() {
+        let proxy = iproyal();
+        assert_eq!(
+            proxy.redacted(),
+            "http://wavo:<redacted>@geo.iproyal.com:12321"
+        );
+        assert!(!format!("{proxy:?} {}", proxy.redacted()).contains("p@ss"));
+    }
+
+    #[test]
+    fn half_a_credential_pair_is_a_startup_failure() {
+        let user_only = Proxy::new("host".to_string(), 1080, Some("wavo".to_string()), None);
+        assert!(matches!(
+            user_only,
+            Err(ConfigError::Missing("WAVO_PROXY_PASSWORD"))
+        ));
+        let password_only = Proxy::new("host".to_string(), 1080, None, Some(Secret::new("p")));
+        assert!(matches!(
+            password_only,
+            Err(ConfigError::Missing("WAVO_PROXY_USERNAME"))
+        ));
     }
 
     #[test]

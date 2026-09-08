@@ -17,7 +17,8 @@ The design is written down in [SPEC.md](SPEC.md); this file is how to run it.
 
 ```
 Telegram ──long poll──▶ wavo ──stdio──▶ demix-mcp ──▶ demix (spleeter, ffmpeg, yt-dlp)
-                         │
+                         │                            │ downloads only
+                         │                            └──▶ optional proxy ──▶ YouTube
                          ├──HTTP──▶ an OpenAI-compatible chat completions API
                          └──HTTP──▶ plainsong  ──▶  your music collection
 ```
@@ -171,6 +172,11 @@ a startup failure naming the variable.
 | `WAVO_SHUTDOWN_GRACE_SEC` | `30` | | Graceful shutdown window |
 | `RUST_LOG` | `wavo=info` | | Log filter |
 | `DEMIX_YT_DLP_ARGS` | — | | Passed through to demix, e.g. `--cookies-from-browser` |
+| `WAVO_ENABLE_PROXY` | `false` | | Send downloads through a proxy ([below](#when-youtube-gets-suspicious)) |
+| `WAVO_PROXY_HOST` | — | ✔ with the proxy on | Proxy hostname, e.g. `geo.iproyal.com` |
+| `WAVO_PROXY_PORT` | — | ✔ with the proxy on | Proxy port, e.g. `12321` |
+| `WAVO_PROXY_USERNAME` | — | | Proxy username; set it with the password or not at all |
+| `WAVO_PROXY_PASSWORD` | — | | Proxy password |
 
 Two more exist for tests and unusual setups, and are not part of the deployment
 surface: `WAVO_MCP_COMMAND` (default `demix-mcp`) and `TELEGRAM_API_BASE`
@@ -263,7 +269,7 @@ player clients and a `pytubefix` fallback all refused. Two things cause it, and
 wavo names both in its startup log, so read that first:
 
 ```sh
-docker compose logs wavo | grep -E 'yt-dlp|cookies'
+docker compose logs wavo | grep -E 'yt-dlp|cookies|proxy'
 ```
 
 **A stale yt-dlp.** YouTube breaks it every few weeks, and the image pins a
@@ -274,8 +280,42 @@ push, and `docker compose pull && docker compose up -d`.
 
 **A datacenter IP.** Those are the ranges YouTube asks to *"sign in to confirm
 you're not a bot"*, so a download that works at home fails on a VPS however
-fresh yt-dlp is. Export cookies from a browser where you are signed in and hand
-the file to yt-dlp through a git-ignored `docker-compose.override.yml`:
+fresh yt-dlp is. There are two ways out of that range, and they can be combined.
+
+*A residential proxy.* Set five variables in `.env` and downloads go out through
+someone else's home connection instead of your VPS's address. The four proxy
+details are what [iproyal.com](https://iproyal.com) shows on a residential
+proxy's access page; any other user:password HTTP proxy has the same four:
+
+```sh
+WAVO_ENABLE_PROXY=true
+WAVO_PROXY_HOST=geo.iproyal.com
+WAVO_PROXY_PORT=12321
+WAVO_PROXY_USERNAME=your-proxy-user
+WAVO_PROXY_PASSWORD=your-proxy-password
+```
+
+Then `docker compose up -d`. With `WAVO_ENABLE_PROXY=false` — the default — the
+other four are ignored entirely, so they can stay in `.env` between the times
+they help; with it true, a missing host or port is a startup failure. The proxy
+carries the demix side and nothing else: Telegram, OpenAI and plainsong are
+still reached direct. What crosses it is the audio, plus the one-off ~300 MB
+spleeter model download if the `wavo-work` volume is still empty. wavo names
+the proxy in its startup log (with the password taken out) and opens a socket to
+it, so a proxy that is not answering says so there:
+
+```
+INFO wavo: downloads go through a proxy proxy=http://user:<redacted>@geo.iproyal.com:12321
+INFO wavo: proxy accepted a connection proxy=geo.iproyal.com:12321
+```
+
+That probe is a bare TCP connect, so it proves the proxy is up, not that the
+credentials are right — a wrong password turns up later as a failed download.
+Residential bandwidth is metered and audio is not small, so watch the first few
+runs against the plan you bought.
+
+*Cookies.* Export them from a browser where you are signed in and hand the file
+to yt-dlp through a git-ignored `docker-compose.override.yml`:
 
 ```yaml
 services:

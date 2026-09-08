@@ -65,7 +65,7 @@ async fn a_local_file_is_processed_published_listed_and_playable() {
         100 * 1024 * 1024,
     );
 
-    let mcp = McpClient::connect(&env_or("WAVO_MCP_COMMAND", "demix-mcp"), work.path())
+    let mcp = McpClient::connect(&env_or("WAVO_MCP_COMMAND", "demix-mcp"), work.path(), None)
         .await
         .expect("demix-mcp must be on PATH");
 

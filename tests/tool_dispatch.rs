@@ -56,7 +56,7 @@ async fn harness(
         cfg.max_upload_bytes(),
     ));
     let mcp = Arc::new(
-        McpClient::connect(stub_server().to_str().unwrap(), work.path())
+        McpClient::connect(stub_server().to_str().unwrap(), work.path(), None)
             .await
             .unwrap(),
     );

@@ -15,6 +15,7 @@ use rmcp::{RoleClient, ServiceExt};
 use serde_json::{json, Map, Value};
 use tokio::sync::Mutex;
 
+use crate::config::{Proxy, Secret};
 use crate::error::McpError;
 
 /// How often a dead child may be restarted before wavo stops trying (§8.3).
@@ -35,6 +36,7 @@ type Service = RunningService<RoleClient, ()>;
 pub struct McpClient {
     command: String,
     work_dir: PathBuf,
+    proxy: Option<Proxy>,
     service: Mutex<Option<Arc<Service>>>,
     tools: Mutex<Vec<McpTool>>,
     restarts: Mutex<Vec<Instant>>,
@@ -44,10 +46,19 @@ pub struct McpClient {
 impl McpClient {
     /// Spawn `demix-mcp` and discover its tools. Failing here is a startup
     /// failure (§10.3) — wavo has nothing to offer without them.
-    pub async fn connect(command: &str, work_dir: &Path) -> Result<Self, McpError> {
+    ///
+    /// `proxy` is where an outbound proxy takes effect: the child is the only
+    /// process that fetches from the open web, so it is the only one that gets
+    /// one (§9).
+    pub async fn connect(
+        command: &str,
+        work_dir: &Path,
+        proxy: Option<Proxy>,
+    ) -> Result<Self, McpError> {
         let client = Self {
             command: command.to_string(),
             work_dir: work_dir.to_path_buf(),
+            proxy,
             service: Mutex::new(None),
             tools: Mutex::new(Vec::new()),
             restarts: Mutex::new(Vec::new()),
@@ -145,6 +156,16 @@ impl McpClient {
         for secret in ["TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY", "PLAINSONG_TOKEN"] {
             command.env_remove(secret);
         }
+        // The one secret that is meant to travel: the proxy credentials, which
+        // are the child's to use and nobody else's. They go in the environment
+        // rather than into `DEMIX_YT_DLP_ARGS` because an environment variable
+        // is not part of any command line demix might echo into its stderr —
+        // and demix's stderr is read back by wavo. yt-dlp (urllib) and the
+        // pytubefix fallback (requests) both honour these four; the lower-case
+        // spellings are the ones requests actually looks for.
+        for (key, value) in proxy_env(self.proxy.as_ref()) {
+            command.env(key, value.expose());
+        }
 
         let transport = TokioChildProcess::new(command).map_err(|source| McpError::Spawn {
             command: self.command.clone(),
@@ -189,6 +210,20 @@ impl McpClient {
     }
 }
 
+/// The proxy environment the demix child is started with, empty when no proxy
+/// is configured — in which case whatever `HTTP_PROXY` the host set is inherited
+/// as it always was, since wavo has no business overriding it.
+fn proxy_env(proxy: Option<&Proxy>) -> Vec<(&'static str, Secret)> {
+    let Some(proxy) = proxy else {
+        return Vec::new();
+    };
+    let url = proxy.url();
+    ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]
+        .into_iter()
+        .map(|key| (key, url.clone()))
+        .collect()
+}
+
 /// MCP tools answer with content blocks; FastMCP puts the tool's dict in
 /// `structuredContent` and repeats it as JSON text. Prefer the structured form,
 /// fall back to parsing the text, and only then to wrapping it.
@@ -220,6 +255,32 @@ fn to_json(structured: Option<Value>, text: &str, is_error: bool) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_child_gets_the_proxy_under_every_spelling() {
+        let proxy = Proxy::new(
+            "geo.iproyal.com".to_string(),
+            12321,
+            Some("wavo".to_string()),
+            Some(Secret::new("secret")),
+        )
+        .unwrap();
+
+        let env = proxy_env(Some(&proxy));
+        let keys: Vec<&str> = env.iter().map(|(key, _)| *key).collect();
+        assert_eq!(
+            keys,
+            ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]
+        );
+        assert!(env
+            .iter()
+            .all(|(_, url)| url.expose() == "http://wavo:secret@geo.iproyal.com:12321"));
+    }
+
+    #[test]
+    fn no_proxy_configured_leaves_the_inherited_environment_alone() {
+        assert!(proxy_env(None).is_empty());
+    }
 
     #[test]
     fn a_structured_result_is_used_as_is() {

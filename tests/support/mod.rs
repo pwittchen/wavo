@@ -37,6 +37,7 @@ pub fn test_config(work_dir: std::path::PathBuf) -> wavo::config::Config {
         plainsong_public_url: "https://music.example.com".to_string(),
         plainsong_token: Secret::new("test-plainsong-token"),
         plainsong_max_upload_mb: 100,
+        proxy: None,
         work_dir,
         mcp_command: "demix-mcp".to_string(),
         max_concurrent_jobs: 1,

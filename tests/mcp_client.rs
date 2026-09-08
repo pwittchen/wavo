@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
+use wavo::config::{Proxy, Secret};
 use wavo::error::McpError;
 use wavo::mcp::McpClient;
 
@@ -33,7 +34,7 @@ async fn tools_are_discovered_at_startup() {
         return;
     }
     let work = tempfile::tempdir().unwrap();
-    let client = McpClient::connect(stub_server().to_str().unwrap(), work.path())
+    let client = McpClient::connect(stub_server().to_str().unwrap(), work.path(), None)
         .await
         .unwrap();
 
@@ -61,7 +62,7 @@ async fn a_call_returns_the_tools_own_json() {
         return;
     }
     let work = tempfile::tempdir().unwrap();
-    let client = McpClient::connect(stub_server().to_str().unwrap(), work.path())
+    let client = McpClient::connect(stub_server().to_str().unwrap(), work.path(), None)
         .await
         .unwrap();
 
@@ -89,13 +90,66 @@ async fn a_call_returns_the_tools_own_json() {
     client.shutdown().await;
 }
 
+/// The proxy is only useful if the process that reaches YouTube can see it, so
+/// this asks the child what it was started with (§9).
+#[tokio::test]
+async fn a_configured_proxy_reaches_the_child() {
+    if !python3_available() {
+        return;
+    }
+    let work = tempfile::tempdir().unwrap();
+    let proxy = Proxy::new(
+        "127.0.0.1".to_string(),
+        12321,
+        Some("wavo".to_string()),
+        Some(Secret::new("pass word")),
+    )
+    .unwrap();
+    let client = McpClient::connect(stub_server().to_str().unwrap(), work.path(), Some(proxy))
+        .await
+        .unwrap();
+
+    let value = client.call("env", Map::new()).await.unwrap();
+    for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+        assert_eq!(
+            value["env"][key], "http://wavo:pass%20word@127.0.0.1:12321",
+            "{key}"
+        );
+    }
+    // The secrets that are not the child's business still stay behind.
+    assert_eq!(value["env"]["TELEGRAM_BOT_TOKEN"], "");
+
+    client.shutdown().await;
+}
+
+/// With the proxy off, the child's environment is wavo's own — whatever the
+/// host set, unchanged.
+#[tokio::test]
+async fn no_proxy_configured_overrides_nothing() {
+    if !python3_available() {
+        return;
+    }
+    let work = tempfile::tempdir().unwrap();
+    let client = McpClient::connect(stub_server().to_str().unwrap(), work.path(), None)
+        .await
+        .unwrap();
+
+    let value = client.call("env", Map::new()).await.unwrap();
+    assert_eq!(
+        value["env"]["HTTPS_PROXY"],
+        std::env::var("HTTPS_PROXY").unwrap_or_default()
+    );
+
+    client.shutdown().await;
+}
+
 #[tokio::test]
 async fn a_child_that_dies_mid_call_is_restarted_for_the_next_one() {
     if !python3_available() {
         return;
     }
     let work = tempfile::tempdir().unwrap();
-    let client = McpClient::connect(stub_server().to_str().unwrap(), work.path())
+    let client = McpClient::connect(stub_server().to_str().unwrap(), work.path(), None)
         .await
         .unwrap();
 
@@ -124,7 +178,7 @@ async fn a_server_that_keeps_dying_is_reported_as_unavailable() {
         return;
     }
     let work = tempfile::tempdir().unwrap();
-    let client = McpClient::connect(stub_server().to_str().unwrap(), work.path())
+    let client = McpClient::connect(stub_server().to_str().unwrap(), work.path(), None)
         .await
         .unwrap();
 

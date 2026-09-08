@@ -42,6 +42,14 @@ services:
       WAVO_MAX_CONCURRENT_JOBS: ${WAVO_MAX_CONCURRENT_JOBS:-1}
       WAVO_KEEP_JOB_FILES: ${WAVO_KEEP_JOB_FILES:-false}
       DEMIX_YT_DLP_ARGS: ${DEMIX_YT_DLP_ARGS:-}
+      # Off unless WAVO_ENABLE_PROXY=true, in which case downloads — and only
+      # downloads — go out through this proxy. The other four are ignored while
+      # it is off, so credentials can sit in .env between the times they help.
+      WAVO_ENABLE_PROXY: ${WAVO_ENABLE_PROXY:-false}
+      WAVO_PROXY_HOST: ${WAVO_PROXY_HOST:-}
+      WAVO_PROXY_PORT: ${WAVO_PROXY_PORT:-}
+      WAVO_PROXY_USERNAME: ${WAVO_PROXY_USERNAME:-}
+      WAVO_PROXY_PASSWORD: ${WAVO_PROXY_PASSWORD:-}
       RUST_LOG: ${RUST_LOG:-wavo=info}
     # No port is published: long polling needs no ingress, and the health
     # endpoint is only used by the container health check.

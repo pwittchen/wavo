@@ -102,9 +102,10 @@ listener answering a fixed response is enough).
 │                                                                │
 │   /work  ── job outputs + spleeter model cache (volume)        │
 └────────────────────────────────────────────────────────────────┘
-                           │ HTTPS/HTTP + Bearer token
-                           ▼
-                  plainsong container  ──▶  /data volume
+      │ downloads, optionally             │ HTTPS/HTTP + Bearer token
+      │ through a proxy (§9)              │
+      ▼                                   ▼
+    YouTube                             plainsong container  ──▶  /data volume
 ```
 
 ### 3.2 Why demix runs in the same container
@@ -503,6 +504,11 @@ stands alone.
 
 The full stderr always goes to the log at `warn`, regardless of what the user sees.
 
+A 403 that survives every strategy is usually the deployment's IP rather than the
+request: YouTube distrusts datacenter ranges, which is what `WAVO_ENABLE_PROXY` (§9) and
+operator-supplied cookies (`DEMIX_YT_DLP_ARGS`) are for. Neither is on by default, and
+both are operator decisions — wavo never picks a proxy or a cookie jar by itself.
+
 ### 8.3 Cancellation and shutdown
 
 - `/cancel` sets a cancellation flag on the turn. The LLM loop checks it between
@@ -552,6 +558,22 @@ a single clear message naming the missing variable.
 | `WAVO_SHUTDOWN_GRACE_SEC` | `30` | | Graceful shutdown window |
 | `RUST_LOG` | `wavo=info` | | Log filter |
 | `DEMIX_YT_DLP_ARGS` | — | | Passed through to demix (e.g. `--cookies-from-browser`) |
+| `WAVO_ENABLE_PROXY` | `false` | | Send downloads through an outbound HTTP proxy |
+| `WAVO_PROXY_HOST` | — | ✔ when enabled | Proxy hostname (e.g. iproyal.com's `geo.iproyal.com`) |
+| `WAVO_PROXY_PORT` | — | ✔ when enabled | Proxy port |
+| `WAVO_PROXY_USERNAME` | — | | Proxy username; required together with the password or not at all |
+| `WAVO_PROXY_PASSWORD` | — | | Proxy password; redacted like every other secret |
+
+The proxy exists because YouTube distrusts datacenter IP ranges (§8.2), so it covers
+**downloads only**: it is set on the `demix-mcp` child's environment
+(`HTTP_PROXY`/`HTTPS_PROXY`, both spellings — yt-dlp's urllib and the pytubefix
+fallback's requests each read one), and wavo's own calls to Telegram, the LLM provider
+and plainsong are unaffected. The credentials travel in the child's environment rather
+than in `DEMIX_YT_DLP_ARGS` so they cannot appear on a command line demix echoes into
+its stderr, which wavo reads back. With the flag off the other four variables are
+ignored entirely and the child inherits whatever proxy environment the host set; with it
+on, a missing host or port is a startup failure, and an unreachable proxy is a startup
+warning plus one log line naming it with the password removed.
 
 ---
 
@@ -598,6 +620,11 @@ Before the first poll, wavo verifies and fails loudly on: required env vars pres
 `initialize` + `tools/list` succeed and contain `process_audio`; plainsong reachable
 (`GET /api/tracks`) and the token accepted (a `HEAD`-equivalent probe); Telegram
 `getMe` succeeds. Each failure names the variable or binary at fault.
+
+Three more are reported but not fatal, because each one only breaks downloads: the
+installed yt-dlp version, whether a cookies file named in `DEMIX_YT_DLP_ARGS` can be
+read, and — when `WAVO_ENABLE_PROXY=true` — whether the proxy accepts a TCP connection
+within five seconds.
 
 ### 10.4 Compose
 
@@ -686,9 +713,10 @@ wavo/
 
 ## 12. Security notes
 
-- **The plainsong token and the OpenAI key are never logged**, never included in an
-  error message sent to Telegram, and never placed in the LLM context. Config `Debug`
-  impls redact them.
+- **The plainsong token, the OpenAI key and the proxy password are never logged**, never
+  included in an error message sent to Telegram, and never placed in the LLM context.
+  Config `Debug` impls redact them; the proxy is logged as
+  `http://user:<redacted>@host:port`.
 - **The chat allow-list is the only authentication.** Anyone who can message the bot can
   spend the operator's OpenAI credits and CPU, so an unset allow-list refuses to start.
 - **The model cannot choose paths.** `cwd` and `output_dir` are stripped from the tool
@@ -703,7 +731,9 @@ wavo/
   four audio operations plus an upload to the operator's own store. `delete_track` is
   the one destructive tool, and it is off by default.
 - **Egress**: the container talks to Telegram, the LLM provider, YouTube and plainsong.
-  Nothing listens on a published port.
+  Nothing listens on a published port. With `WAVO_ENABLE_PROXY=true` the YouTube half of
+  that goes through the operator's proxy, which then sees the traffic wavo's downloader
+  makes — one more party to trust, and the reason the proxy is off by default.
 - TLS termination for plainsong is a reverse proxy's job, as in plainsong's own spec.
 
 ---

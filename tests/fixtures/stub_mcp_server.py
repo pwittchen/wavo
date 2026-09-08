@@ -7,6 +7,7 @@ It implements only what wavo uses — `initialize`, `tools/list` and `tools/call
 """
 
 import json
+import os
 import sys
 
 TOOLS = [
@@ -33,6 +34,21 @@ TOOLS = [
         "description": "Exit without answering, the way a crashing server does.",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "env",
+        "description": "Report the environment the child was started with.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+]
+
+# What a test may ask about: the proxy demix downloads through, and one of the
+# secrets that must never follow the child out of wavo.
+REPORTED_ENV = [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "TELEGRAM_BOT_TOKEN",
 ]
 
 
@@ -51,6 +67,18 @@ def call_tool(request_id, params):
 
     if name == "die":
         sys.exit(1)
+
+    if name == "env":
+        payload = {"ok": True, "env": {key: os.environ.get(key, "") for key in REPORTED_ENV}}
+        result(
+            request_id,
+            {
+                "content": [{"type": "text", "text": json.dumps(payload)}],
+                "structuredContent": payload,
+                "isError": False,
+            },
+        )
+        return
 
     if name == "process_audio":
         output_dir = arguments.get("output_dir", "")

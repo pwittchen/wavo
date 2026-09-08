@@ -63,6 +63,12 @@ Things that are not obvious from a single file:
   `Err`: a failure is `{"ok": false, "error": …}` so the model can correct
   itself. demix stderr is classified by `classify_demix_error` into a
   human sentence; the raw output only goes to the log.
+- **The proxy is the child's, not wavo's.** `WAVO_ENABLE_PROXY` (§9) puts
+  `HTTP_PROXY`/`HTTPS_PROXY` on the `demix-mcp` child's environment in
+  `mcp/mod.rs` and nowhere else, so it moves YouTube downloads and leaves
+  Telegram, OpenAI and plainsong direct. The credentials go through the
+  environment rather than `DEMIX_YT_DLP_ARGS` on purpose: demix's stderr is read
+  back into the log, and a command line would carry the password into it.
 - **wavo composes its own links.** Track and listing URLs are appended after the
   model's text, so a hallucinated URL cannot reach a user.
 - **Bilingual strings are a lookup, not an i18n framework.** Every string wavo
