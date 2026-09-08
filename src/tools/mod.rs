@@ -614,8 +614,24 @@ fn is_log_noise(line: &str) -> bool {
     // `Unable to run botGuard. Skipping poToken generation …` is printed before
     // the download is even attempted, so it is the first line of stderr of every
     // fallback attempt; left in, it became the "detail" of failures it had
-    // nothing to do with.
-    if lower.contains("unable to run botguard") || lower.contains("skipping potoken generation") {
+    // nothing to do with. The warning spans *two* lines, because the reason it
+    // interpolates is pytubefix's own `RuntimeError`, whose message carries a
+    // newline: matching only the first line left "Please install Node.js or
+    // ensure it's in your PATH." as the detail — advice about a runtime this
+    // image deliberately does not ship, presented to a user as the failure.
+    if lower.contains("unable to run botguard")
+        || lower.contains("skipping potoken generation")
+        || lower.contains("node.js is required but not found")
+        || lower.contains("please install node.js")
+    {
+        return true;
+    }
+    // The sequel to that warning: with no poToken generated, pytubefix warns
+    // once more per attempt that the client it picked wants one. Also every
+    // run, also not the failure. Only the *warning* is noise — pytubefix
+    // raises `PoTokenRequired` with nearly the same sentence, and that line
+    // starts with the exception's name rather than the client's.
+    if lower.starts_with("the ") && lower.contains("client requires potoken") {
         return true;
     }
     // Python's `warnings` module, and TensorFlow's chatter under it.
@@ -665,6 +681,14 @@ pub fn classify_demix_error(stdout: &str, stderr: &str) -> DemixFailure {
     if haystack.contains("http error 403")
         || haystack.contains("all download strategies failed")
         || haystack.contains("sign in to confirm")
+        // How the same refusal reads when it lands on pytubefix instead of
+        // yt-dlp — and where it lands first is `search_youtube`, which demix
+        // routes through pytubefix alone. Both are exception names or exception
+        // text, never the warnings above: YouTube served a bot check instead of
+        // the video, which is the blocked download by another name.
+        || haystack.contains("detected as a bot")
+        || haystack.contains("botdetection")
+        || haystack.contains("potokenrequired")
     {
         return DemixFailure::YoutubeBlocked;
     }
@@ -792,9 +816,12 @@ mod tests {
         );
     }
 
-    /// pytubefix prints this, unprefixed, whenever it runs without `node`.
+    /// pytubefix prints this, unprefixed, whenever it runs without `node` — and
+    /// prints it over two lines, because the reason is the `str()` of a
+    /// `RuntimeError` whose own message contains a newline.
     const BOTGUARD_WARNING: &str = "Unable to run botGuard. Skipping poToken generation, \
-                                    reason: Node.js is required but not found. Tried path: node";
+         reason: Node.js is required but not found. Tried path: node\n\
+         Please install Node.js or ensure it's in your PATH.";
 
     #[test]
     fn the_botguard_warning_is_never_reported_as_the_failure() {
@@ -818,6 +845,67 @@ mod tests {
         // And with nothing else to go on it still does not reach the user.
         let failure = classify_demix_error("", BOTGUARD_WARNING);
         assert_eq!(failure, DemixFailure::Other(String::new()));
+    }
+
+    /// The warning pytubefix adds once it has given up on a poToken. Like the
+    /// botGuard one it opens every attempt this image makes, successful or not.
+    const POTOKEN_WARNING: &str = "The WEB client requires PoToken to obtain functional streams, \
+                                   See more details at \
+                                   https://github.com/JuanBindez/pytubefix/pull/209";
+
+    #[test]
+    fn a_search_refused_by_youtubes_bot_check_reads_as_a_block() {
+        // Verbatim from the server, trimmed: `search_youtube` goes through
+        // pytubefix, not yt-dlp, so a refused *search* carries none of the
+        // strings the yt-dlp checks look for. Every line above the last is
+        // either noise or scaffolding, which is how "Please install Node.js or
+        // ensure it's in your PATH." became a user's explanation of it.
+        let stderr = format!(
+            "{ESSENTIA_BANNER}\n\
+             {BOTGUARD_WARNING}\n\
+             {POTOKEN_WARNING}\n\
+             Traceback (most recent call last):\n  \
+             File \"/opt/venv-demix/lib/python3.8/site-packages/pytubefix/__main__.py\", line 802\n    \
+             if 'title' in self.vid_info['videoDetails']:\n\
+             KeyError: 'videoDetails'\n\
+             \n\
+             During handling of the above exception, another exception occurred:\n\
+             \n\
+             Traceback (most recent call last):\n  \
+             File \"/opt/venv-demix/lib/python3.8/site-packages/demix/cli.py\", line 244\n    \
+             return video.watch_url, video.title\n\
+             pytubefix.exceptions.BotDetection: A30Fx3wnfwE This request was detected as a bot. \
+             Use `use_po_token=True` or switch to WEB client to view."
+        );
+        assert_eq!(
+            classify_demix_error("✗ Searching YouTube for 'myslovitz'...", &stderr),
+            DemixFailure::YoutubeBlocked
+        );
+        for lang in [Lang::En, Lang::Pl] {
+            let message = DemixFailure::YoutubeBlocked.message(lang);
+            assert!(!message.contains("Node.js"), "{message}");
+            assert!(!message.contains("PoToken"), "{message}");
+        }
+    }
+
+    #[test]
+    fn the_potoken_warning_is_noise_but_the_exception_of_the_same_name_is_not() {
+        // Only the warning: it explains nothing about this run, so the run has
+        // nothing to say.
+        assert_eq!(
+            classify_demix_error("", POTOKEN_WARNING),
+            DemixFailure::Other(String::new())
+        );
+        // The exception pytubefix raises says almost the same sentence, and it
+        // *is* the failure — a block, reported as one.
+        assert_eq!(
+            classify_demix_error(
+                "",
+                "pytubefix.exceptions.PoTokenRequired: A30Fx3wnfwE The WEB client \
+                 requires PoToken to obtain functional streams"
+            ),
+            DemixFailure::YoutubeBlocked
+        );
     }
 
     #[test]
