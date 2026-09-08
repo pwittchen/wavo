@@ -254,17 +254,17 @@ exactly this reason.
 
 ### a public name for plainsong
 
-Compose publishes plainsong on port 40167 on every interface, IPv4 and IPv6, so
+Compose publishes plainsong on port 40000 on every interface, IPv4 and IPv6, so
 it is reachable from outside the host as soon as the firewall lets that port
 through. Both families matter: writing an address into `PLAINSONG_PUBLISH`
-binds only that address's family, so a `0.0.0.0:40167` publish leaves anything
+binds only that address's family, so a `0.0.0.0:40000` publish leaves anything
 that arrives over the host's public IPv6 — a VPS provider's domain proxy, say —
-with nothing to connect to, while `http://host:40167` keeps working and hides
+with nothing to connect to, while `http://host:40000` keeps working and hides
 the hole. Either way, wavo has to be told the origin, or every link it sends
 will say `127.0.0.1`:
 
 ```sh
-$EDITOR .env                   # PLAINSONG_PUBLIC_URL=http://vps.example.com:40167
+$EDITOR .env                   # PLAINSONG_PUBLIC_URL=http://vps.example.com:40000
 docker compose up -d           # recreates wavo with the new value
 ```
 
