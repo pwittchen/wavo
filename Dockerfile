@@ -45,18 +45,6 @@ ARG DEMIX_MCP_REF=master
 # the layer. Releases: https://pypi.org/project/yt-dlp/
 ARG YT_DLP_VERSION=2026.8.19
 
-# Node is not a nicety: YouTube's player now hands out a JavaScript challenge,
-# and both downloaders demix tries need a JS runtime to answer it. yt-dlp solves
-# the challenge in one (without it, formats are missing and the download dies
-# with 403), and its pytubefix fallback runs botGuard for the PO token, which is
-# Node specifically — `Node.js is required but not found. Tried path: node`.
-# A local checkout usually has one installed already, which is exactly why this
-# only ever fails in the container. Ubuntu 22.04's apt Node is 12.x, far too old,
-# so the official binary is unpacked instead — just `bin/node`, no npm.
-# Releases: https://nodejs.org/dist/ (SHASUMS256.txt next to the tarball).
-ARG NODE_VERSION=24.20.0
-ARG NODE_SHA256=855d581f8a4eb1a8117e3426de25fe02770592febcfb31369aee1ffbfee9e8ec
-
 ENV DEBIAN_FRONTEND=noninteractive
 
 # gpg-agent is not in the base image, and without it add-apt-repository cannot
@@ -83,10 +71,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Python 3.10: the MCP server, and yt-dlp (apt's is too old to keep up with
-# YouTube). The `[default]` extra is what pulls `yt-dlp-ejs`, the challenge
-# solver script the JS runtime below executes; a bare `pip install yt-dlp` has a
-# runtime but nothing to run in it, and every YouTube extraction then warns
-# "Signature solving failed" and loses formats.
+# YouTube). The `[default]` extra is what yt-dlp's own install instructions ask
+# for: brotli, websockets and the impersonation support a bare `pip install
+# yt-dlp` leaves out, all of which YouTube extraction leans on.
 RUN python3.10 -m venv /opt/venv-mcp \
     && /opt/venv-mcp/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv-mcp/bin/pip install --no-cache-dir \
@@ -100,25 +87,6 @@ RUN python3.8 -m venv /opt/venv-demix \
     && /opt/venv-demix/bin/pip install --no-cache-dir \
         "demix==${DEMIX_VERSION}" \
         essentia
-
-# The JavaScript runtime, last, so bumping it rebuilds neither Python
-# environment.
-RUN curl -fsSL -o /tmp/node.tar.gz \
-        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" \
-    && echo "${NODE_SHA256}  /tmp/node.tar.gz" | sha256sum -c - \
-    && tar -xzf /tmp/node.tar.gz -C /usr/local/bin --strip-components=2 \
-        "node-v${NODE_VERSION}-linux-x64/bin/node" \
-    && rm /tmp/node.tar.gz \
-    && node --version
-
-# yt-dlp enables only `deno` by default, so an installed Node is ignored unless
-# it is asked for by name. demix builds the yt-dlp command line itself, and
-# DEMIX_YT_DLP_ARGS belongs to the operator, so the runtime is enabled where
-# neither has to know about it: yt-dlp's own system config file.
-RUN printf '%s\n' \
-        '# Enable the Node installed in this image; yt-dlp defaults to deno only.' \
-        '--js-runtimes node' \
-    > /etc/yt-dlp.conf
 
 # demix's environment comes first so that `demix-mcp`, which shells out to the
 # `demix` command, finds it.

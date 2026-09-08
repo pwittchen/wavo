@@ -259,11 +259,11 @@ docker run --rm -v wavo_plainsong-data:/data -v "$PWD:/backup" busybox \
 ### when YouTube gets suspicious
 
 *"YouTube blocked the download"* means demix ran out of ways in: four yt-dlp
-player clients and a `pytubefix` fallback all refused. Three things cause it,
-and wavo names all three in its startup log, so read that first:
+player clients and a `pytubefix` fallback all refused. Two things cause it, and
+wavo names both in its startup log, so read that first:
 
 ```sh
-docker compose logs wavo | grep -E 'yt-dlp|cookies|JavaScript'
+docker compose logs wavo | grep -E 'yt-dlp|cookies'
 ```
 
 **A stale yt-dlp.** YouTube breaks it every few weeks, and the image pins a
@@ -271,15 +271,6 @@ version (`YT_DLP_VERSION` in the [Dockerfile](Dockerfile)) precisely so the
 build cache cannot keep shipping an old one. If the logged version is months
 behind [the current release](https://pypi.org/project/yt-dlp/), bump the `ARG`,
 push, and `docker compose pull && docker compose up -d`.
-
-**No JavaScript runtime.** YouTube's player hands out a JavaScript challenge,
-and answering it takes one: yt-dlp needs it for the signature, and pytubefix
-runs botGuard on Node in particular for the PO token (`Unable to run botGuard …
-Node.js is required but not found`). The image installs Node (`NODE_VERSION` in
-the [Dockerfile](Dockerfile)) and points yt-dlp at it through `/etc/yt-dlp.conf`,
-because yt-dlp enables only `deno` unless told otherwise. A development machine
-almost always has one already — which is why this fails in the container and
-nowhere else.
 
 **A datacenter IP.** Those are the ranges YouTube asks to *"sign in to confirm
 you're not a bot"*, so a download that works at home fails on a VPS however
@@ -312,9 +303,7 @@ cargo fmt --all
 
 To run the binary outside Docker you need `demix`, `demix-mcp`, `ffmpeg` and
 `yt-dlp` on `PATH` — the startup checks refuse to start without them — plus a
-plainsong to talk to. `node` (or `deno`, for yt-dlp alone) is wanted too, for
-YouTube's JavaScript challenge; wavo warns at startup rather than refusing,
-because uploaded files never go near YouTube:
+plainsong to talk to:
 
 ```sh
 TELEGRAM_BOT_TOKEN=… WAVO_ALLOWED_CHAT_IDS=… OPENAI_API_KEY=… \
