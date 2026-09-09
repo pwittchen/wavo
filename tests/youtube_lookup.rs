@@ -51,6 +51,38 @@ async fn a_refused_or_unreadable_lookup_is_no_answer_rather_than_a_failure() {
     assert_eq!(missing.lookup("https://youtu.be/fJ9rUzIMcZQ").await, None);
 }
 
+/// The client the download works through is the client the lookup asks first:
+/// yt-dlp's default one is answered with "This video is not available" for
+/// videos demix downloads without trouble, and a lookup that came back empty is
+/// what left the model composing a title out of nothing (§7).
+#[tokio::test]
+async fn the_lookup_asks_through_the_client_the_download_works_through() {
+    if !python3_available() {
+        return;
+    }
+    let names = YtDlp::new(stub_yt_dlp(), None)
+        .lookup("https://youtu.be/client")
+        .await
+        .expect("the lookup came back empty");
+
+    assert_eq!(names.title, "tv_simply");
+}
+
+/// And when that client is the one YouTube has stopped talking to, the lookup
+/// asks again rather than leaving the track unnamed.
+#[tokio::test]
+async fn a_client_youtube_refuses_is_followed_by_the_next_one() {
+    if !python3_available() {
+        return;
+    }
+    let names = YtDlp::new(stub_yt_dlp(), None)
+        .lookup("https://youtu.be/fallback")
+        .await
+        .expect("the lookup gave up after the first client");
+
+    assert_eq!(names.title, "Queen - Bohemian Rhapsody (Official Video)");
+}
+
 /// Asking what a video is called is a request to YouTube like any other, so it
 /// goes out the way the downloads do (§9).
 #[tokio::test]

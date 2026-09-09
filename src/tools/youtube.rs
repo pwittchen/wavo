@@ -30,6 +30,23 @@ const LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// plainsong caps the composed one at 200 characters anyway (§7).
 const MAX_NAME_CHARS: usize = 200;
 
+/// The YouTube player clients the lookup asks through, in order, until one
+/// answers.
+///
+/// yt-dlp's default client is not the one that works from this deployment:
+/// YouTube answers it with `ERROR: [youtube] …: This video is not available`
+/// for videos that play in a browser and that demix downloads without trouble,
+/// because demix's working strategy asks through `tv_simply` (6f27376). A
+/// lookup that only ever ran the default client therefore came back empty for
+/// exactly the links users send, and the model — handed a result with no names
+/// in it — composed a title out of nothing.
+///
+/// So the lookup asks the way the download that just succeeded asked, and keeps
+/// yt-dlp's own choice behind it: which client YouTube is currently willing to
+/// talk to is a thing that changes, and a second attempt costs one request on a
+/// path that has already failed.
+const PLAYER_CLIENTS: [&str; 2] = ["tv_simply", "default"];
+
 /// What YouTube says a video is.
 ///
 /// `title` is the video's own title and is always there. `artist` and `track`
@@ -107,7 +124,8 @@ fn clip(text: &str) -> String {
     out
 }
 
-/// The real lookup: one `yt-dlp` that downloads nothing.
+/// The real lookup: a `yt-dlp` that downloads nothing, per player client until
+/// one of them answers.
 pub struct YtDlp {
     command: String,
     proxy: Option<Proxy>,
@@ -123,17 +141,17 @@ impl YtDlp {
             proxy,
         }
     }
-}
 
-#[async_trait]
-impl SongNameLookup for YtDlp {
-    async fn lookup(&self, url: &str) -> Option<SongNames> {
+    /// One `yt-dlp` run, asked through one player client.
+    async fn ask(&self, url: &str, player_client: &str) -> Option<SongNames> {
         let mut command = tokio::process::Command::new(&self.command);
         command
             .arg("--dump-single-json")
             .arg("--skip-download")
             .arg("--no-playlist")
             .arg("--no-warnings")
+            .arg("--extractor-args")
+            .arg(format!("youtube:player_client={player_client}"))
             // Everything after this is the URL, however it starts.
             .arg("--")
             .arg(url)
@@ -157,6 +175,7 @@ impl SongNameLookup for YtDlp {
             Err(_) => {
                 tracing::warn!(
                     timeout = ?LOOKUP_TIMEOUT,
+                    player_client,
                     "yt-dlp did not say what the video is called in time"
                 );
                 return None;
@@ -164,9 +183,12 @@ impl SongNameLookup for YtDlp {
         };
 
         if !output.status.success() {
-            // Whatever YouTube refused with belongs in the log, not in a title.
+            // Whatever YouTube refused with belongs in the log, not in a title
+            // — and which client it refused is how the next block is told from
+            // the last one.
             tracing::warn!(
                 status = %output.status,
+                player_client,
                 reason = %last_line(&String::from_utf8_lossy(&output.stderr)),
                 "yt-dlp could not say what the video is called"
             );
@@ -176,11 +198,24 @@ impl SongNameLookup for YtDlp {
         let info: Value = match serde_json::from_slice(&output.stdout) {
             Ok(info) => info,
             Err(e) => {
-                tracing::warn!(error = %e, "yt-dlp answered with something that is not JSON");
+                tracing::warn!(error = %e, player_client, "yt-dlp answered with something that is not JSON");
                 return None;
             }
         };
         names_from_json(&info)
+    }
+}
+
+#[async_trait]
+impl SongNameLookup for YtDlp {
+    async fn lookup(&self, url: &str) -> Option<SongNames> {
+        for player_client in PLAYER_CLIENTS {
+            if let Some(names) = self.ask(url, player_client).await {
+                tracing::debug!(player_client, "YouTube said what the video is called");
+                return Some(names);
+            }
+        }
+        None
     }
 }
 

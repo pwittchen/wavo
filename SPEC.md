@@ -361,6 +361,9 @@ It states:
   translated and never pre-joined, and the modification ("bez wokalu", "vocals removed",
   "tonacja a-moll", "slowed down to 80%", "oryginał" / "original" when nothing changed)
   in the language of the user's most recent message, per file rather than per run.
+- That a song is never invented: when neither the user's message nor a tool result says
+  what the recording is, `artist` and `title` are left empty and the reply says the
+  title could not be read. A guessed performer or song is stored, and wrong (§6.4).
 
 ### 6.3 Tool catalogue
 
@@ -410,9 +413,16 @@ into the history:
   the track with and plainsong stores an "Unknown artist" (§7). wavo asks `yt-dlp`
   (`--dump-single-json --skip-download`, the same proxy as the download, §9) once the
   run has succeeded; a lookup that fails or times out is a `warn` log and nothing else
-  — an unnamed track is a worse title, not a failed turn. The names are facts for the
-  model to compose a title from, never a title: splitting `Queen - Bohemian Rhapsody
-  (Official Video)` into a performer and a song is the model's job.
+  — an unnamed track is a worse title, not a failed turn. The question goes through
+  `--extractor-args youtube:player_client=…`, `tv_simply` first and yt-dlp's `default`
+  behind it: `tv_simply` is the client demix's working download strategy uses (§10.2),
+  and the default one is answered with `This video is not available` for videos that
+  play in a browser — a lookup that only ran the default client came back empty for
+  exactly the links users send, and the model, given a result with no names in it,
+  composed a title out of nothing. The names are facts for the model to compose a
+  title from, never a title: splitting `Queen - Bohemian Rhapsody (Official Video)`
+  into a performer and a song is the model's job, and a result carrying none of them
+  means an empty `artist` and `title`, never a guessed one (§6.2).
 - The absolute-path table is kept **outside** the model's context, in the turn state,
   keyed by the relative path the model sees. `publish_track` resolves through that
   table, so the model can never name a path wavo did not produce.
