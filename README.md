@@ -266,6 +266,42 @@ Two things make a bad day less bad, and neither costs anything:
 and a multiple of the table above in RAM; the semaphore in `jobs.rs` exists for
 exactly this reason.
 
+### what one track costs
+
+Numbers from **2026-09-09**, at list prices and 3.72 PLN to the dollar. Both
+halves of this move — re-check them before quoting the total to anyone.
+
+A request that ends in a published track is three or four model calls (a search
+or a link, `process_audio`, `publish_track`, the reply). The fixed part is the
+system prompt plus the tool catalogue, which is why a turn's logged `tokens_in`
+starts around 2.5k before any work happens:
+
+| | per track | rate | cost | in PLN |
+|---|---|---|---|---|
+| `gpt-5-mini` in | ~12k tokens | $0.25 / 1M | ~$0.003 | ~0.01 zł |
+| `gpt-5-mini` out | ~1.5k tokens | $2.00 / 1M | ~$0.003 | ~0.01 zł |
+| residential proxy | ~6 MB | $1.75–7 / GB | $0.01–0.04 | 0.04–0.15 zł |
+| CPU and RAM | 2–5 min | the VPS you already pay for | — | — |
+
+So **$0.015–0.05 a track, roughly 6–18 gr** — and the model is the cheap half.
+Bandwidth is the part that scales badly: the per-GB rate differs 4× between the
+smallest proxy plan and a terabyte commitment, so which plan you bought matters
+more to the total than which model you run.
+
+Two things move the model half. Prompt caching takes the input down by most of
+its cost, since every iteration in a turn resends the same prefix — though
+`process_audio` can outlast the cache window on a slow box. Escalation to
+`OPENAI_MODEL_FALLBACK` costs about 5× the mini rate for that turn, but only
+happens after two invalid tool calls (§8.1), so it should stay rare; the
+`escalated=true` field on the `turn finished` log line is how often it isn't.
+
+The token figures are extrapolated from one measured turn, not from a month of
+traffic. To measure your own, read the line wavo logs at the end of every turn:
+
+```sh
+docker compose logs wavo | grep 'turn finished'
+```
+
 ### a public name for plainsong
 
 Compose publishes plainsong on port 40000 on every interface, IPv4 and IPv6, so
