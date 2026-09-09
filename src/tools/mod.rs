@@ -711,20 +711,53 @@ fn useful_lines(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The exception a Python traceback ends in, if `stderr` is one.
+///
+/// Python puts the frames in between: every one of them is indented, and the
+/// exception is the first line back at column 0 after the last `File "…"`. That
+/// is the whole rule, and it is worth spelling out because the obvious shortcut
+/// — "a traceback says what went wrong on its last line" — is wrong whenever
+/// the exception's message runs to more than one line. demix's download error
+/// is exactly that: `RuntimeError: Failed to download from YouTube.` carries a
+/// dozen lines of attempts and advice under it, and the last of them, ` -
+/// downloading the audio yourself and running demix with --file`, is what a
+/// user was once handed as the reason their link failed.
+///
+/// Chained tracebacks ("During handling of the above exception…") fall out of
+/// this for free: the *last* frame belongs to the last traceback, so the line
+/// after it is the exception that was actually raised.
+fn exception_line(stderr: &str) -> Option<&str> {
+    let lines: Vec<&str> = stderr.lines().collect();
+    let last_frame = lines.iter().rposition(|line| {
+        line.starts_with(char::is_whitespace) && line.trim_start().starts_with("File \"")
+    })?;
+    lines[last_frame + 1..]
+        .iter()
+        .map(|line| (line, line.trim()))
+        .find(|(line, trimmed)| {
+            !line.starts_with(char::is_whitespace) && !trimmed.is_empty() && !is_log_noise(trimmed)
+        })
+        .map(|(line, _)| line.trim())
+}
+
 /// The one line to show a user when nothing more specific was recognised.
 ///
-/// A Python traceback puts the reason on its *last* line and scaffolding on the
-/// first, so a traceback is read from the end; everything else from the front.
+/// A traceback is read through [`exception_line`]; everything else from the
+/// front. A traceback with no frames at all — demix's stderr truncated, or a
+/// test's shorthand — keeps the old "read it from the end" fallback, which is
+/// still the better guess when there is no structure to go on.
 fn failure_detail(stdout: &str, stderr: &str) -> String {
     let lines = useful_lines(stderr);
-    let line = if lines
-        .first()
-        .is_some_and(|line| line.starts_with("Traceback (most recent call last)"))
-    {
-        lines.last().copied()
-    } else {
-        lines.first().copied()
-    };
+    let line = exception_line(stderr).or(
+        if lines
+            .first()
+            .is_some_and(|line| line.starts_with("Traceback (most recent call last)"))
+        {
+            lines.last().copied()
+        } else {
+            lines.first().copied()
+        },
+    );
     // demix reports some failures on stdout as one human sentence and leaves
     // stderr to essentia alone.
     let line = line.or_else(|| {
@@ -746,6 +779,17 @@ pub fn classify_demix_error(stdout: &str, stderr: &str) -> DemixFailure {
     if haystack.contains("http error 403")
         || haystack.contains("all download strategies failed")
         || haystack.contains("sign in to confirm")
+        // demix's own summary once every yt-dlp strategy and every pytubefix
+        // client has been tried: `RuntimeError: Failed to download from
+        // YouTube. Attempts: …`. Matching the summary rather than the
+        // individual attempts is the point — the attempts are eight different
+        // sentences that YouTube rewords whenever it likes ("This video is not
+        // available", "Requested format is not available", "Video
+        // unavailable", "list index out of range"), and every one of them
+        // means the same thing to the person who sent the link. Without this,
+        // the turn fell through to `Other` and reported whichever line of
+        // demix's advice `failure_detail` happened to pick.
+        || haystack.contains("failed to download from youtube")
         // How the same refusal reads when it lands on pytubefix instead of
         // yt-dlp — and where it lands first is `search_youtube`, which demix
         // routes through pytubefix alone. Both are exception names or exception
@@ -971,6 +1015,57 @@ mod tests {
             ),
             DemixFailure::YoutubeBlocked
         );
+    }
+
+    /// Verbatim from the server on 2026-09-09, for a container with no
+    /// JavaScript runtime: yt-dlp cannot answer YouTube's `n` challenge, so
+    /// every player client loses its formats and demix gives up. Not one of the
+    /// eight attempts contains "403", "sign in to confirm" or any other string
+    /// the checks above look for.
+    const NO_JS_RUNTIME_DOWNLOAD_FAILURE: &str = "\
+Traceback (most recent call last):
+  File \"/opt/venv-demix/bin/demix\", line 8, in <module>
+    sys.exit(main())
+  File \"/opt/venv-demix/lib/python3.8/site-packages/demix/cli.py\", line 346, in download_video
+    raise RuntimeError(
+RuntimeError: Failed to download from YouTube. Attempts:
+  - yt-dlp [default]: [youtube] -4y4jW0m4-U: This video is not available
+  - yt-dlp [tv_simply]: [youtube] -4y4jW0m4-U: Requested format is not available. Use --list-formats for a list of available formats
+  - yt-dlp [web_embedded]: [youtube] -4y4jW0m4-U: Video unavailable
+  - yt-dlp [mweb]: [youtube] -4y4jW0m4-U: Requested format is not available. Use --list-formats for a list of available formats
+  - pytubefix [WEB]: get_initial_function_name: could not find match for multiple
+  - pytubefix [ANDROID_VR]: list index out of range
+  - pytubefix [ANDROID]: HTTP Error 400: Bad Request
+  - pytubefix [IOS]: list index out of range
+
+YouTube may be rate-limiting this machine or requiring a PO token. Try:
+  - brew upgrade yt-dlp (newer releases usually restore access)
+  - passing browser cookies, e.g.
+      DEMIX_YT_DLP_ARGS='--cookies-from-browser chrome' demix -u <url> ...
+  - downloading the audio yourself and running demix with --file";
+
+    #[test]
+    fn demix_giving_up_on_a_download_reads_as_a_block() {
+        let stderr =
+            format!("{ESSENTIA_BANNER}\n{BOTGUARD_WARNING}\n{NO_JS_RUNTIME_DOWNLOAD_FAILURE}");
+        assert_eq!(
+            classify_demix_error("✗ Downloading video...", &stderr),
+            DemixFailure::YoutubeBlocked
+        );
+    }
+
+    #[test]
+    fn a_multi_line_exception_is_reported_by_its_first_line_not_its_last() {
+        // What the user actually got: "Przetwarzanie nie powiodło się:
+        // downloading the audio yourself and running demix with --file" —
+        // advice meant for whoever runs demix by hand, offered to someone who
+        // had sent a link to a Telegram bot.
+        let detail = failure_detail("", NO_JS_RUNTIME_DOWNLOAD_FAILURE);
+        assert_eq!(
+            detail,
+            "RuntimeError: Failed to download from YouTube. Attempts:"
+        );
+        assert!(!detail.contains("--file"), "{detail}");
     }
 
     #[test]
