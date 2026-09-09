@@ -7,6 +7,12 @@ services:
     environment:
       PLAINSONG_TOKEN: ${PLAINSONG_TOKEN:?set PLAINSONG_TOKEN in .env}
       PLAINSONG_MAX_UPLOAD_MB: ${PLAINSONG_MAX_UPLOAD_MB:-100}
+      # plainsong's own interface settings, read by plainsong and not by wavo:
+      # the collection this compose file deploys is a Polish one called
+      # "piosenki", so the language switch is pinned rather than offered. Set
+      # either in .env to get another name, or another language.
+      PLAINSONG_LANG: ${PLAINSONG_LANG:-pl}
+      PLAINSONG_TITLE: ${PLAINSONG_TITLE:-piosenki}
     volumes:
       - plainsong-data:/data
     # Published on port 40000 on every interface, IPv4 *and* IPv6, so the links

@@ -190,6 +190,14 @@ Two more exist for tests and unusual setups, and are not part of the deployment
 surface: `WAVO_MCP_COMMAND` (default `demix-mcp`) and `TELEGRAM_API_BASE`
 (default `https://api.telegram.org`).
 
+Three others in `.env` are read by docker compose and passed to the plainsong
+container, never by wavo: `PLAINSONG_PUBLISH` (where the port is published) and
+plainsong's two interface settings, `PLAINSONG_LANG` and `PLAINSONG_TITLE`. The
+compose file defaults them to `pl` and `piosenki`, which pins plainsong's
+interface to Polish and puts that name in its header and browser tab; set either
+in `.env` for a different name or language, and `PLAINSONG_LANG=` (empty) to get
+the language switch back.
+
 `GET /healthz` on `WAVO_HEALTH_ADDR` answers `{"ok":true,"mcp":"up","plainsong":"up"}`
 when the MCP child is alive and plainsong answered within the last minute, and
 `503` otherwise. It is the container health check; no port is published for it.
