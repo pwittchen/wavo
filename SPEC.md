@@ -602,6 +602,11 @@ Multi-stage:
    - `python3.10` (default in 22.04) → virtualenv `/opt/venv-mcp` with `demix-mcp`
    - `python3.8` (deadsnakes PPA) → virtualenv `/opt/venv-demix` with `demix`
    - `ffmpeg`, `yt-dlp`, `ca-certificates`
+   - `deno`, for YouTube's `n` challenge: without a JavaScript runtime yt-dlp
+     silently loses every format and the download fails as `Requested format is
+     not available`. It arrives through yt-dlp's own `[deno]` extra, and it is
+     `deno` rather than `node` because that is the only runtime yt-dlp enables
+     without a config file telling it to.
    - `PATH=/opt/venv-demix/bin:/opt/venv-mcp/bin:$PATH`, so `demix-mcp` finds `demix`
    - The `wavo` binary at `/usr/local/bin/wavo`
    - Runs as unprivileged user `wavo` (uid `10001`), owning `/work`
@@ -634,10 +639,11 @@ Before the first poll, wavo verifies and fails loudly on: required env vars pres
 (`GET /api/tracks`) and the token accepted (a `HEAD`-equivalent probe); Telegram
 `getMe` succeeds. Each failure names the variable or binary at fault.
 
-Three more are reported but not fatal, because each one only breaks downloads: the
-installed yt-dlp version, whether a cookies file named in `DEMIX_YT_DLP_ARGS` can be
-read, and — when `WAVO_ENABLE_PROXY=true` — whether the proxy accepts a TCP connection
-within five seconds.
+Four more are reported but not fatal, because each one only breaks downloads: the
+installed yt-dlp version, whether `deno` is on `PATH` for YouTube's `n` challenge,
+whether a cookies file named in `DEMIX_YT_DLP_ARGS` can be read, and — when
+`WAVO_ENABLE_PROXY=true` — whether the proxy accepts a TCP connection within five
+seconds.
 
 ### 10.4 Compose
 

@@ -73,11 +73,27 @@ RUN apt-get update \
 # Python 3.10: the MCP server, and yt-dlp (apt's is too old to keep up with
 # YouTube). The `[default]` extra is what yt-dlp's own install instructions ask
 # for: brotli, websockets and the impersonation support a bare `pip install
-# yt-dlp` leaves out, all of which YouTube extraction leans on.
+# yt-dlp` leaves out, all of which YouTube extraction leans on. It also carries
+# `yt-dlp-ejs`, the challenge solver script — which needs something to run it.
+#
+# That something is `[deno]`, and it is load-bearing (§10.2). YouTube's player
+# wraps stream URLs in an `n` challenge; with no JavaScript runtime yt-dlp warns
+# "n challenge solving failed", drops every real format, and dies with
+# "Requested format is not available" — which reads nothing like a block and
+# has nothing to do with the datacenter IP. Measured on this deployment
+# 2026-09-09: the four player clients demix tries fail with that, or with
+# "This video is not available", for a video that downloads fine the moment a
+# runtime is on PATH. Deno, not Node, because yt-dlp enables `deno` alone
+# unless told otherwise, so the extra needs no config file to go with it; the
+# extra is yt-dlp's own, so the runtime it pulls is one that release was tested
+# against. (This is what commit 3f02444 removed on the strength of a
+# measurement that only ever ran yt-dlp's *default* player client — which
+# fails, runtime or not, for an unrelated reason. Do not remove it again
+# without testing `--extractor-args youtube:player_client=tv_simply`.)
 RUN python3.10 -m venv /opt/venv-mcp \
     && /opt/venv-mcp/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv-mcp/bin/pip install --no-cache-dir \
-        "yt-dlp[default]==${YT_DLP_VERSION}" \
+        "yt-dlp[default,deno]==${YT_DLP_VERSION}" \
         "demix-mcp @ git+https://github.com/pwittchen/demix.git@${DEMIX_MCP_REF}#subdirectory=mcp"
 
 # Python 3.8: demix itself. `essentia` is what key detection and transposition

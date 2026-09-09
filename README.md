@@ -308,11 +308,11 @@ docker run --rm -v wavo_plainsong-data:/data -v "$PWD:/backup" busybox \
 ### when YouTube gets suspicious
 
 *"YouTube blocked the download"* means demix ran out of ways in: four yt-dlp
-player clients and a `pytubefix` fallback all refused. Two things cause it, and
-wavo names both in its startup log, so read that first:
+player clients and a `pytubefix` fallback all refused. Three things cause it,
+and wavo names all three in its startup log, so read that first:
 
 ```sh
-docker compose logs wavo | grep -E 'yt-dlp|cookies|proxy'
+docker compose logs wavo | grep -E 'yt-dlp|cookies|proxy|JavaScript'
 ```
 
 **A stale yt-dlp.** YouTube breaks it every few weeks, and the image pins a
@@ -320,6 +320,26 @@ version (`YT_DLP_VERSION` in the [Dockerfile](Dockerfile)) precisely so the
 build cache cannot keep shipping an old one. If the logged version is months
 behind [the current release](https://pypi.org/project/yt-dlp/), bump the `ARG`,
 push, and `docker compose pull && docker compose up -d`.
+
+**No JavaScript runtime.** YouTube wraps its stream URLs in an `n` challenge,
+and answering it takes one. This is the cause that hides, because yt-dlp does
+not call it a block: it warns `n challenge solving failed`, drops every real
+format, and fails with `Requested format is not available` — which reads like a
+mistake in demix's arguments. The image installs `deno` through yt-dlp's own
+`[deno]` extra, and `deno` is the name that matters, because it is the only
+runtime yt-dlp enables unless a config file says otherwise. A development
+machine usually has one lying around, which is why this fails in the container
+and nowhere else. If the log says otherwise, the image is older than this
+paragraph:
+
+```
+INFO wavo: JavaScript runtime: deno path=/opt/venv-mcp/bin/deno
+```
+
+Reproducing it is a one-liner — `yt-dlp --no-js-runtimes -f bestaudio/best
+--extractor-args youtube:player_client=tv_simply <url>` fails on any machine.
+Note the `player_client`: yt-dlp's *default* client fails on plenty of videos
+runtime or no runtime, so a test that leaves it out proves nothing either way.
 
 **A datacenter IP.** Those are the ranges YouTube asks to *"sign in to confirm
 you're not a bot"*, so a download that works at home fails on a VPS however
@@ -387,7 +407,9 @@ cargo fmt --all
 
 To run the binary outside Docker you need `demix`, `demix-mcp`, `ffmpeg` and
 `yt-dlp` on `PATH` — the startup checks refuse to start without them — plus a
-plainsong to talk to:
+plainsong to talk to. `deno` is wanted too, for YouTube's `n` challenge; wavo
+warns at startup rather than refusing, because an uploaded file never goes near
+YouTube:
 
 ```sh
 TELEGRAM_BOT_TOKEN=… WAVO_ALLOWED_CHAT_IDS=… OPENAI_API_KEY=… \

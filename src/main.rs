@@ -241,6 +241,7 @@ async fn report_downloader(config: &Config) {
         Err(e) => tracing::warn!(error = %e, "cannot run `yt-dlp --version`"),
     }
 
+    report_js_runtime();
     report_proxy(config.proxy.as_ref()).await;
 
     let args = std::env::var("DEMIX_YT_DLP_ARGS").unwrap_or_default();
@@ -273,6 +274,33 @@ async fn report_downloader(config: &Config) {
                  YouTube downloads will behave as if there were no cookies"
             ),
         }
+    }
+}
+
+/// Say whether yt-dlp has a JavaScript runtime to work with, once, at startup
+/// (§10.3).
+///
+/// YouTube wraps its stream URLs in an `n` challenge, and answering it takes a
+/// runtime. Without one, yt-dlp does not report a block — it warns "n challenge
+/// solving failed", quietly drops every real format, and then fails the
+/// download with `Requested format is not available`, which looks like a
+/// mistake in demix's arguments and is not. The image installs `deno` through
+/// yt-dlp's own extra, and `deno` is the name because it is the only runtime
+/// yt-dlp enables unless told otherwise.
+///
+/// A warning, not a startup failure: an uploaded file never goes near YouTube,
+/// and refusing to start would take the bot down for a class of request it
+/// still serves perfectly.
+fn report_js_runtime() {
+    match which("deno") {
+        Some(path) => tracing::info!(path = %path.display(), "JavaScript runtime: deno"),
+        // Node would do for yt-dlp too, but only via `--js-runtimes node`,
+        // which nothing here passes — so finding one is not reassuring.
+        None => tracing::warn!(
+            "no `deno` on PATH: yt-dlp cannot answer YouTube's `n` challenge, so \
+             downloads will fail with \"Requested format is not available\" \
+             however healthy the proxy and the yt-dlp version look"
+        ),
     }
 }
 
