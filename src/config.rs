@@ -156,6 +156,9 @@ pub struct Config {
     /// How long half a request waits for its other half (§5.6). Zero starts
     /// every message on its own, as wavo did before coalescing existed.
     pub coalesce_window: Duration,
+    /// How long a message that is only a link waits before wavo asks what to do
+    /// with it (§5.6). Zero never asks; the link waits in silence either way.
+    pub link_question_delay: Duration,
     pub tool_output_chars: usize,
     pub progress_interval: Duration,
     pub keep_job_files: bool,
@@ -206,6 +209,7 @@ impl Config {
             history_turns: positive("WAVO_HISTORY_TURNS", 12)?,
             session_ttl: minutes("WAVO_SESSION_TTL_MIN", 120)?,
             coalesce_window: seconds("WAVO_COALESCE_WINDOW_SEC", 15)?,
+            link_question_delay: seconds("WAVO_LINK_QUESTION_SEC", 60)?,
             tool_output_chars: positive("WAVO_TOOL_OUTPUT_CHARS", 2000)?,
             progress_interval: seconds("WAVO_PROGRESS_INTERVAL_SEC", 5)?,
             keep_job_files: boolean("WAVO_KEEP_JOB_FILES", false)?,

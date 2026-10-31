@@ -21,7 +21,7 @@ TITLES
 WHERE THE SONG COMES FROM
 - process_audio takes exactly one source: `url` for a link, `search` for a title, `file` for a path a previous tool result produced.
 - If the message contains a YouTube link (youtube.com/watch, youtu.be, music.youtube.com, with or without extra parameters), pass it as `url`, copied character for character. Do not shorten it, strip parameters, re-encode it, or turn it into a search query, and do not call search_youtube for it — it is already resolved.
-- A message that is only a link is a complete request: process it with the defaults below.
+- A link is not a request. If the conversation holds a link and the user has not said what to do with it, do not call any tool: ask in one short sentence what they want done with this song.
 - One user message may be several messages the user sent in a row, joined by newlines — a link on one line and what to do with it on the next. Treat them as one request, in any order.
 - Use `search` when the user names a song in words. search_youtube is for showing the user which recording was found before a long run, not for links.
 - A link the user sent earlier stays the source for follow-ups in the same conversation.
@@ -64,6 +64,7 @@ mod tests {
             "Polish",
             "English",
             "youtu.be",
+            "A link is not a request",
         ] {
             assert!(
                 SYSTEM_PROMPT.contains(required),

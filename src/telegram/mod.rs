@@ -84,6 +84,10 @@ impl Bot {
                 if evicted > 0 {
                     tracing::debug!(evicted, "evicted idle sessions");
                 }
+                let forgotten = self.inbox.evict_idle(self.config.session_ttl).await;
+                if forgotten > 0 {
+                    tracing::debug!(forgotten, "forgot links nobody answered for");
+                }
             }
         }
     }
@@ -128,7 +132,8 @@ impl Bot {
     /// Hold a message that is only half a request until its other half arrives,
     /// or until the window closes (§5.6). Whatever accumulated then runs as one
     /// turn, with the language decided by the whole of it rather than by the
-    /// half that happened to arrive first.
+    /// half that happened to arrive first. A message that is only a link runs
+    /// nothing: it waits for an instruction, and gets asked for one.
     async fn collect_and_run(self: Arc<Self>, chat_id: i64, text: String, lang: Lang) {
         // A chat that is already working is told so straight away; waiting first
         // would only delay the same answer (§3.4).
@@ -153,10 +158,27 @@ impl Bot {
                     None => return,
                 }
             }
+            Collected::LinkOnly(generation) => {
+                self.ask_about_link(chat_id, generation).await;
+                return;
+            }
         };
 
         let lang = self.sessions.language_for(chat_id, &request).await;
         self.run_turn(chat_id, request, lang).await;
+    }
+
+    /// Ask what to do with a held link, unless the user speaks first (§5.6).
+    async fn ask_about_link(&self, chat_id: i64, generation: u64) {
+        let delay = self.config.link_question_delay;
+        if delay.is_zero() {
+            return;
+        }
+        tokio::time::sleep(delay).await;
+        if self.inbox.claim_question(chat_id, generation).await {
+            let lang = self.sessions.language_for(chat_id, "").await;
+            self.say(chat_id, t(Msg::LinkQuestion, lang)).await;
+        }
     }
 
     async fn run_command(&self, chat_id: i64, command: Command, lang: Lang) {

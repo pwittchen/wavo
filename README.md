@@ -98,15 +98,15 @@ their usual shapes work — `youtube.com/watch?v=…`, `youtu.be/…`,
 and the link is handed to demix (and from there to yt-dlp) exactly as you sent
 it, with no YouTube search in between.
 
-A link on its own still gets a proper title. Once the run is done, wavo asks
+A link needs no title from you. Once the run is done, wavo asks
 YouTube what the video is called and hands the answer to the model, which takes
 the performer and the song out of it — so the track lands in plainsong as
 *Queen — Bohemian Rhapsody (bez wokalu)* rather than *Unknown artist*. If you
 name the song yourself, what you wrote wins.
 
 You do not have to fit it all into one message. A message that is only half a
-request — just a link, just a song title, just *"usuń wokal"* — waits about
-15 seconds (`WAVO_COALESCE_WINDOW_SEC`) for the rest, in either order:
+request — just a song title, just *"usuń wokal"* — waits about 15 seconds
+(`WAVO_COALESCE_WINDOW_SEC`) for the rest, in either order:
 
 ```
 you   https://youtu.be/fJ9rUzIMcZQ
@@ -114,8 +114,17 @@ you   usuń wokal                      ← wavo starts here, on both messages at
 ```
 
 If the rest never comes, wavo runs what it has when the window closes: a lone
-link gets converted with the defaults (no stem separation, no tempo or pitch
-change), and a lone instruction gets a question about which song you mean.
+instruction gets a question about which song you mean.
+
+A link on its own starts nothing, however long you wait. wavo keeps it until you
+say what to do with it, and after a minute of silence
+(`WAVO_LINK_QUESTION_SEC`) it asks once:
+
+```
+you   https://youtu.be/fJ9rUzIMcZQ
+wavo  Co mam zrobić z tym utworem? Mogę np. usunąć wokal, zwolnić tempo albo zmienić tonację.
+you   usuń wokal                      ← wavo starts here
+```
 
 ```
 you   https://youtu.be/fJ9rUzIMcZQ slow it down to 80% and give me just the vocals
@@ -171,6 +180,7 @@ a startup failure naming the variable.
 | `WAVO_HISTORY_TURNS` | `12` | | Retained user/assistant pairs per chat |
 | `WAVO_SESSION_TTL_MIN` | `120` | | Idle session eviction |
 | `WAVO_COALESCE_WINDOW_SEC` | `15` | | How long half a request waits for its other half; `0` disables |
+| `WAVO_LINK_QUESTION_SEC` | `60` | | How long a lone link waits before wavo asks what to do with it; `0` never asks |
 | `WAVO_TOOL_OUTPUT_CHARS` | `2000` | | Truncation of tool stdout/stderr |
 | `WAVO_PROGRESS_INTERVAL_SEC` | `5` | | Minimum gap between progress edits |
 | `WAVO_KEEP_JOB_FILES` | `false` | | Keep job directories after publishing |

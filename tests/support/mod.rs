@@ -48,6 +48,7 @@ pub fn test_config(work_dir: std::path::PathBuf) -> wavo::config::Config {
         history_turns: 12,
         session_ttl: Duration::from_secs(7200),
         coalesce_window: Duration::from_secs(15),
+        link_question_delay: Duration::from_secs(60),
         tool_output_chars: 2000,
         progress_interval: Duration::from_secs(5),
         keep_job_files: false,

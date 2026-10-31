@@ -48,6 +48,7 @@ pub enum Msg {
     CancelRequested,
     CancelPending,
     CancelNothing,
+    LinkQuestion,
     AllSongs,
     TitleUnknownArtist,
     TitleOriginal,
@@ -70,7 +71,7 @@ pub enum Msg {
 
 impl Msg {
     /// Used by the table test; also keeps the list in one place.
-    pub const ALL: [Msg; 39] = [
+    pub const ALL: [Msg; 40] = [
         Msg::Help,
         Msg::TextOnly,
         Msg::Busy,
@@ -92,6 +93,7 @@ impl Msg {
         Msg::CancelRequested,
         Msg::CancelPending,
         Msg::CancelNothing,
+        Msg::LinkQuestion,
         Msg::AllSongs,
         Msg::TitleUnknownArtist,
         Msg::TitleOriginal,
@@ -198,6 +200,14 @@ pub fn t(msg: Msg, lang: Lang) -> &'static str {
 
         (Msg::CancelNothing, Lang::En) => "Nothing is running.",
         (Msg::CancelNothing, Lang::Pl) => "Nic nie jest uruchomione.",
+
+        // A link with no instruction, a minute of silence after it (§5.6).
+        (Msg::LinkQuestion, Lang::En) => {
+            "What should I do with this song? For example: remove the vocals, slow it down, change the key."
+        }
+        (Msg::LinkQuestion, Lang::Pl) => {
+            "Co mam zrobić z tym utworem? Mogę np. usunąć wokal, zwolnić tempo albo zmienić tonację."
+        }
 
         (Msg::AllSongs, Lang::En) => "all songs",
         (Msg::AllSongs, Lang::Pl) => "wszystkie utwory",

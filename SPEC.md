@@ -271,14 +271,23 @@ So a message that is only **half** a request is held for `WAVO_COALESCE_WINDOW_S
 
 - A request is whole when it names **what to work on** — a link, a song named in words,
   or the song already under discussion in this chat — **and says what to do with it**.
-- A message that is only a link, only a song title, or only an instruction ("usuń wokal")
-  is half a request and starts the window.
+- A message that is only a song title or only an instruction ("usuń wokal") is half a
+  request and starts the window. A message that is only a link is half a request too,
+  and is held by the rule below instead.
 - Every further message from that chat joins the buffer and re-opens the window. As soon
   as what has accumulated is whole, the turn starts immediately — no waiting out the rest
   of the window.
 - When the window closes on a still-incomplete buffer, it runs **as it stands**: a lone
-  link is processed with the defaults of §6.2, a lone instruction gets the clarifying
-  question. Nothing is ever held indefinitely.
+  instruction gets the clarifying question.
+- **A buffer that is nothing but a link never runs on its own**, because a link does not
+  say what to do and a run nobody asked for costs a download and a track in the
+  collection. It starts no window and stays in the buffer. After
+  `WAVO_LINK_QUESTION_SEC` (default `60`, `0` never asks) of silence wavo asks once what
+  to do with the song, in a string of its own and with no call to the model.
+  An instruction that arrives at any point joins the link and runs; an answer wavo has no
+  word for runs when its window closes, and the model reads it. Once wavo has asked, a
+  message carrying a new link replaces the old one, and a held link nobody answers for is
+  dropped silently after `WAVO_SESSION_TTL_MIN`.
 - The halves reach the model as **one user message**, joined by newlines in the order
   they were sent, so the history holds one request rather than two fragments.
 - The reply language is decided by the joined text (§5.5), not by the half that happened
@@ -289,7 +298,8 @@ So a message that is only **half** a request is held for `WAVO_COALESCE_WINDOW_S
 The word lists that decide "instruction" from "song name" are a heuristic and are meant
 to stay one: they only decide *when* to start, never what to do. A song called "Karaoke"
 read as an instruction, or an instruction wavo has no word for, costs one window of
-waiting and nothing else.
+waiting and nothing else. A message of only a link needs no word list at all: it is
+recognised by having no words.
 
 ---
 
@@ -338,8 +348,9 @@ It states:
 - How to pick the source: a YouTube link in the message goes into `process_audio`'s
   `url` verbatim (never shortened, re-encoded or turned into a search, and never sent
   through `search_youtube`, which is for titles); a song named in words goes into
-  `search`; a message that is only a link is a complete request. The link stays the
-  source for follow-ups in the same conversation.
+  `search`; a link with no instruction is not a request, so the model calls no tool and
+  asks what to do with the song (§5.6). The link stays the source for follow-ups in the
+  same conversation.
 - Defaults to apply when the user is vague: `mode=nosplit` unless stems are asked for,
   `2stems` when the user says "karaoke", "instrumental", "backing track" or "vocals",
   no tempo or pitch change unless requested.
@@ -571,6 +582,7 @@ a single clear message naming the missing variable.
 | `WAVO_HISTORY_TURNS` | `12` | | Retained user/assistant pairs per chat |
 | `WAVO_SESSION_TTL_MIN` | `120` | | Idle session eviction |
 | `WAVO_COALESCE_WINDOW_SEC` | `15` | | How long half a request waits for its other half (§5.6); `0` disables |
+| `WAVO_LINK_QUESTION_SEC` | `60` | | How long a lone link waits before wavo asks what to do with it (§5.6); `0` never asks |
 | `WAVO_TOOL_OUTPUT_CHARS` | `2000` | | Truncation of tool stdout/stderr |
 | `WAVO_PROGRESS_INTERVAL_SEC` | `5` | | Minimum gap between progress edits |
 | `WAVO_KEEP_JOB_FILES` | `false` | | Keep job directories after publishing |
