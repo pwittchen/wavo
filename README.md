@@ -437,6 +437,38 @@ credentials are right — a wrong password turns up later as a failed download.
 Residential bandwidth is metered and audio is not small, so watch the first few
 runs against the plan you bought.
 
+[Oxylabs](https://oxylabs.io) residential proxies fit the same four variables,
+with the options carried in the username:
+
+```sh
+WAVO_ENABLE_PROXY=true
+WAVO_PROXY_HOST=pr.oxylabs.io
+WAVO_PROXY_PORT=7777
+WAVO_PROXY_USERNAME=customer-your-proxy-user-sessid-wavo1-sesstime-30
+WAVO_PROXY_PASSWORD=your-proxy-password
+```
+
+The `customer-` prefix is mandatory. `sessid` matters too: without it Oxylabs
+changes the exit IP on every request, so a video's metadata and its audio could
+leave from different addresses. `sesstime` stretches the session from the default
+10 minutes to 30, and a session ends when that timer does, even mid-download. It
+also ends after 60 seconds without requests, and the next one gets a new IP.
+
+Oxylabs restricts some targets on this network, and its published list is not
+exhaustive. YouTube and `googlevideo.com` are not named on it, so ask support
+whether both are allowed before buying a plan. The startup probe cannot tell
+you, so try a real download from inside the container:
+
+```sh
+docker compose exec wavo yt-dlp \
+  --proxy 'http://customer-your-proxy-user-sessid-test1-sesstime-30:your-proxy-password@pr.oxylabs.io:7777' \
+  -f bestaudio/best --extractor-args youtube:player_client=tv_simply \
+  -o '/tmp/oxylabs-test.%(ext)s' '<url>'
+```
+
+A password with reserved characters has to be percent-encoded by hand in that
+command; wavo does the same itself for `WAVO_PROXY_PASSWORD`.
+
 *Cookies.* Export them from a browser where you are signed in and hand the file
 to yt-dlp through a git-ignored `docker-compose.override.yml`:
 
