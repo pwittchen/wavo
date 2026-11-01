@@ -6,7 +6,7 @@ A user sends a request in natural language over Telegram ("slow down Bohemian Rh
 by 20% and give me just the vocals"). wavo turns that into calls to
 [demix](https://github.com/pwittchen/demix) via its MCP server, publishes the resulting
 audio to [plainsong](https://github.com/pwittchen/plainsong) over its REST API, and
-replies with a link to the new track and a link to the whole collection.
+replies with a link to the new track.
 
 The guiding principle, inherited from plainsong, is **simplicity**. No database, no
 queue broker, no web UI of its own, no user accounts. A single Rust binary that talks to
@@ -25,7 +25,7 @@ without losing a listed requirement, it gets dropped.
 - Running demix (download / search YouTube, stem separation, tempo, pitch, key detection
   and transposition, cutting) through the `demix-mcp` MCP server over stdio
 - Uploading the produced audio to plainsong via `POST /api/tracks` with a bearer token
-- Replying with a per-track link and a link to the full listing
+- Replying with a link to each track the request produced
 - Progress feedback while a long job runs
 - An allow-list of Telegram chat IDs — the bot answers nobody else
 - Bilingual operation: requests are understood in Polish and English, and every reply is
@@ -219,7 +219,6 @@ strangers. An empty or unset value is a **startup failure**, not "allow everyone
 ```
 ✅ Bohemian Rhapsody — vocals (0.8×, −2 semitones)
 🎵 https://music.example.com/track.html?id=7f1c…
-📚 all songs: https://music.example.com/
 ```
 
 - Messages are truncated to Telegram's 4096-character limit, with demix logs never
@@ -254,8 +253,8 @@ English out. Nothing is translated for the user and no language is ever announce
   user message, falling back to the chat's last known language and then to English.
   These live in `telegram/format.rs` as a small `&str` lookup keyed by
   `(message_id, Lang)` — an enum with two variants, not an i18n framework.
-- The links block of §5.4 is language-neutral apart from its one label, which follows
-  the same rule (`all songs:` / `wszystkie utwory:`).
+- The links block of §5.4 is language-neutral: track titles and URLs, no label. The
+  modification inside a title follows the same rule (§7).
 
 ---
 
@@ -403,7 +402,7 @@ description, parameters}}`. Two adjustments are applied by wavo before exposing 
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `publish_track` | `path` (string, from a `process_audio` result), `artist`, `title`, `modification` (strings, joined by wavo — see §7) | `{id, track_url, all_tracks_url, size_bytes}` |
+| `publish_track` | `path` (string, from a `process_audio` result), `artist`, `title`, `modification` (strings, joined by wavo — see §7) | `{id, track_url, size_bytes}` |
 | `list_tracks` | `q` (optional string) | Up to 10 `{id, title, track_url}` |
 | `delete_track` | `id` (string) | `{ok}` — exposed only when `WAVO_ALLOW_DELETE=true` (default `false`) |
 
@@ -469,8 +468,7 @@ directory.
   inside the compose network). `PLAINSONG_PUBLIC_URL` is what goes into links sent to
   the user; it defaults to `PLAINSONG_URL` and is set to the externally reachable origin
   in real deployments.
-- Track URL: `{PLAINSONG_PUBLIC_URL}/track.html?id={id}`. Listing URL:
-  `{PLAINSONG_PUBLIC_URL}/`.
+- Track URL: `{PLAINSONG_PUBLIC_URL}/track.html?id={id}`.
 - Before uploading, wavo checks the file is under `PLAINSONG_MAX_UPLOAD_MB` (default
   `100`, kept in sync with plainsong's own limit) and has an accepted extension. A file
   over the limit produces a user-facing message suggesting a shorter cut, not a `413`.
@@ -814,7 +812,7 @@ No test may call the real OpenAI API, the real Telegram API, or YouTube.
    from any other chat returns nothing, and the rejected chat ID appears in the log.
 3. "separate vocals from Queen - Bohemian Rhapsody" results in: a progress message that
    updates at least once, a completed 2-stem run, at least the vocals track published to
-   plainsong, and a final reply containing a working per-track link and the listing link.
+   plainsong, and a final reply containing a working per-track link and no link to the listing.
 4. The published track appears in `GET /api/tracks` and plays from its plainsong track
    page.
 5. "slow down that song to 80%" as a follow-up in the same chat reuses the previous
@@ -833,7 +831,7 @@ No test may call the real OpenAI API, the real Telegram API, or YouTube.
     directory is refused by the path guard, and the refusal is visible in the log.
 13. "oddziel wokal od Queen - Bohemian Rhapsody" performs the same run as its English
     equivalent in criterion 3 and every reply in that turn — progress stages, the final
-    summary and the links block label — is in Polish; switching to English in the next
+    summary and the modification in the track title — is in Polish; switching to English in the next
     message switches the replies to English without losing the song from history.
 14. `/help` sent after a Polish message returns the Polish blurb; sent after an English
     message, the English one.

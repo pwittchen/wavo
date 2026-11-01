@@ -9,7 +9,7 @@ Rhapsody"*, *"slow that song down to 80%"*, or a YouTube link with what to do
 with it — and wavo works out which
 [demix](https://github.com/pwittchen/demix) operations that means, runs them,
 publishes the result to [plainsong](https://github.com/pwittchen/plainsong), and
-replies with a link to the new track and a link to the whole collection.
+replies with a link to the new track.
 
 wavo understands Polish and English, and answers in the language you wrote in.
 
@@ -135,7 +135,6 @@ wavo  ⏳ Thinking…
 
       ✅ Bohemian Rhapsody — vocals (0.8×)
       🎵 https://music.example.com/track.html?id=7f1c…
-      📚 all songs: https://music.example.com/
 ```
 
 The same message in Polish (*"zwolnij do 80% i zostaw sam wokal"*) does the same
@@ -513,9 +512,9 @@ Three rules are worth knowing when reading it:
 - **Tool failures are results, not errors.** A failed demix run comes back as
   `{"ok": false, "error": "…"}` so the model can correct itself, with the full
   stderr in the log and a classified, human sentence for the user.
-- **wavo composes its own links — and its own titles.** The track and listing
-  links are appended by wavo after the model's reply, so a hallucinated URL
-  cannot reach a user. `publish_track` likewise takes the title in three parts
+- **wavo composes its own links — and its own titles.** The track links are
+  appended by wavo after the model's reply, so a hallucinated URL cannot reach a
+  user. `publish_track` likewise takes the title in three parts
   (`artist`, `title`, `modification`) and wavo joins them into
   `Artist — Title (modification)`, with the modification in the user's language;
   a part the model left out gets a localized placeholder, so a title in the

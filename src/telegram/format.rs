@@ -49,7 +49,6 @@ pub enum Msg {
     CancelPending,
     CancelNothing,
     LinkQuestion,
-    AllSongs,
     TitleUnknownArtist,
     TitleOriginal,
     ErrYoutubeBlocked,
@@ -71,7 +70,7 @@ pub enum Msg {
 
 impl Msg {
     /// Used by the table test; also keeps the list in one place.
-    pub const ALL: [Msg; 40] = [
+    pub const ALL: [Msg; 39] = [
         Msg::Help,
         Msg::TextOnly,
         Msg::Busy,
@@ -94,7 +93,6 @@ impl Msg {
         Msg::CancelPending,
         Msg::CancelNothing,
         Msg::LinkQuestion,
-        Msg::AllSongs,
         Msg::TitleUnknownArtist,
         Msg::TitleOriginal,
         Msg::ErrYoutubeBlocked,
@@ -208,9 +206,6 @@ pub fn t(msg: Msg, lang: Lang) -> &'static str {
         (Msg::LinkQuestion, Lang::Pl) => {
             "Co mam zrobić z tym utworem? Mogę np. usunąć wokal, zwolnić tempo albo zmienić tonację."
         }
-
-        (Msg::AllSongs, Lang::En) => "all songs",
-        (Msg::AllSongs, Lang::Pl) => "wszystkie utwory",
 
         // The two fallbacks a published title uses when the model left a part out.
         (Msg::TitleUnknownArtist, Lang::En) => "Unknown artist",
@@ -452,20 +447,12 @@ pub fn truncate_middle(text: &str, limit: usize) -> String {
 }
 
 /// The links block wavo appends itself so the model can never invent a URL (§5.4).
-pub fn links_block(published: &[PublishedTrack], all_tracks_url: &str, lang: Lang) -> String {
-    if published.is_empty() {
-        return String::new();
-    }
+pub fn links_block(published: &[PublishedTrack]) -> String {
     let mut out = String::new();
     for track in published {
         out.push_str(&format!("\n✅ {}", escape_html(&track.title)));
         out.push_str(&format!("\n🎵 {}", escape_html(&track.url)));
     }
-    out.push_str(&format!(
-        "\n📚 {}: {}",
-        t(Msg::AllSongs, lang),
-        escape_html(all_tracks_url)
-    ));
     out
 }
 
@@ -568,18 +555,17 @@ mod tests {
     }
 
     #[test]
-    fn the_links_block_labels_itself_in_the_users_language() {
+    fn the_links_block_names_only_what_this_turn_published() {
         let published = vec![PublishedTrack {
             id: "7f1c".to_string(),
             title: "Bohemian Rhapsody — vocals".to_string(),
             url: "http://music.example.com/track.html?id=7f1c".to_string(),
         }];
-        let pl = links_block(&published, "http://music.example.com/", Lang::Pl);
-        assert!(pl.contains("wszystkie utwory:"));
-        assert!(pl.contains("track.html?id=7f1c"));
-        let en = links_block(&published, "http://music.example.com/", Lang::En);
-        assert!(en.contains("all songs:"));
-        assert!(links_block(&[], "http://music.example.com/", Lang::En).is_empty());
+        assert_eq!(
+            links_block(&published),
+            "\n✅ Bohemian Rhapsody — vocals\n🎵 http://music.example.com/track.html?id=7f1c"
+        );
+        assert!(links_block(&[]).is_empty());
     }
 
     #[test]

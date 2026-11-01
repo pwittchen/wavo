@@ -349,7 +349,8 @@ async fn publishing_walks_from_a_relative_key_to_a_real_upload() {
         result["track_url"],
         "https://music.example.com/track.html?id=7f1c"
     );
-    assert_eq!(result["all_tracks_url"], "https://music.example.com/");
+    // The model is handed this track's link and no way to the whole collection.
+    assert!(result.get("all_tracks_url").is_none());
 
     // The three parts reached plainsong joined into one title, in the multipart body.
     let uploads = h._plainsong_stub.requests().await;

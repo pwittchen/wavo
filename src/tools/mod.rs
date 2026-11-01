@@ -503,7 +503,6 @@ impl Tools {
                     "ok": true,
                     "id": track.id,
                     "track_url": url,
-                    "all_tracks_url": self.plainsong.all_tracks_url(),
                     "size_bytes": track.size_bytes,
                 })
             }

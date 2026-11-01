@@ -57,10 +57,6 @@ impl PlainsongClient {
         format!("{}/track.html?id={}", self.public_base, id)
     }
 
-    pub fn all_tracks_url(&self) -> String {
-        format!("{}/", self.public_base)
-    }
-
     pub fn max_upload_mb(&self) -> u64 {
         self.max_upload_bytes / 1024 / 1024
     }
@@ -449,7 +445,6 @@ mod tests {
             client.track_url("7f1c"),
             "https://music.example.com/track.html?id=7f1c"
         );
-        assert_eq!(client.all_tracks_url(), "https://music.example.com/");
         assert_eq!(client.max_upload_mb(), 100);
     }
 }

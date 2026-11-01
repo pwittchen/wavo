@@ -12,7 +12,7 @@ use tracing::Instrument;
 
 use crate::llm::openai::{ChatMessage, OpenAi, ToolCall};
 use crate::session::PublishedTrack;
-use crate::telegram::format::{t, Lang, Msg};
+use crate::telegram::format::{t, Msg};
 use crate::tools::{ToolBox, TurnCtx};
 
 /// How a turn ended. Everything but `Answered` produces a wavo-composed reply,
@@ -364,14 +364,9 @@ fn message_for(outcome: Outcome) -> Msg {
 
 /// The reply as it goes to Telegram: the model's words, escaped, with the links
 /// block wavo composes appended (§5.4).
-pub fn compose_reply(
-    reply: &str,
-    published: &[PublishedTrack],
-    all_tracks_url: &str,
-    lang: Lang,
-) -> String {
+pub fn compose_reply(reply: &str, published: &[PublishedTrack]) -> String {
     let mut out = crate::telegram::format::escape_html(reply.trim());
-    let links = crate::telegram::format::links_block(published, all_tracks_url, lang);
+    let links = crate::telegram::format::links_block(published);
     if !links.is_empty() {
         out.push('\n');
         out.push_str(&links);
@@ -390,15 +385,15 @@ mod tests {
             title: "Vocals".into(),
             url: "http://x/track.html?id=abc".into(),
         }];
-        let composed = compose_reply("Here you go & enjoy", &published, "http://x/", Lang::En);
+        let composed = compose_reply("Here you go & enjoy", &published);
         assert!(composed.contains("Here you go &amp; enjoy"));
         assert!(composed.contains("track.html?id=abc"));
-        assert!(composed.contains("all songs:"));
+        assert!(!composed.contains("all songs"));
     }
 
     #[test]
     fn a_reply_without_tracks_carries_no_links() {
-        let composed = compose_reply("Which song?", &[], "http://x/", Lang::Pl);
+        let composed = compose_reply("Which song?", &[]);
         assert_eq!(composed, "Which song?");
     }
 }
