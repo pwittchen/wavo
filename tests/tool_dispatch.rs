@@ -346,12 +346,11 @@ async fn publishing_walks_from_a_relative_key_to_a_real_upload() {
 
     assert_eq!(result["ok"], true);
     assert_eq!(result["id"], "7f1c");
-    assert_eq!(
-        result["track_url"],
-        "https://music.example.com/track.html?id=7f1c"
+    // The model gets no address to repeat: the link goes out once, in the links block.
+    assert!(
+        !result.to_string().contains("music.example.com"),
+        "the model was handed an address: {result}"
     );
-    // The model is handed this track's link and no way to the whole collection.
-    assert!(result.get("all_tracks_url").is_none());
 
     // The three parts reached plainsong joined into one title, in the multipart body.
     let uploads = h._plainsong_stub.requests().await;
@@ -365,6 +364,10 @@ async fn publishing_walks_from_a_relative_key_to_a_real_upload() {
     let published = h.ctx.published().await;
     assert_eq!(published.len(), 1);
     assert_eq!(published[0].id, "7f1c");
+    assert_eq!(
+        published[0].url,
+        "https://music.example.com/track.html?id=7f1c"
+    );
 }
 
 #[tokio::test]

@@ -412,7 +412,7 @@ description, parameters}}`. Two adjustments are applied by wavo before exposing 
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `publish_track` | `path` (string, from a `process_audio` result), `artist`, `title`, `modification` (strings, joined by wavo — see §7) | `{id, track_url, size_bytes}` |
+| `publish_track` | `path` (string, from a `process_audio` result), `artist`, `title`, `modification` (strings, joined by wavo — see §7) | `{id, size_bytes}`. No URL: wavo puts the track in the links block (§5.4), so the link appears once |
 | `list_tracks` | `q` (optional string) | Up to 10 `{id, title, track_url}` |
 | `find_track` | `query` (string) | `{total, linked, similar}`: how many tracks match, the titles of up to 10, newest first, and when nothing matches up to 5 nearest titles. No URLs: wavo puts the `linked` tracks in the links block (§5.4); `similar` tracks get no link |
 | `delete_track` | `id` (string) | `{ok}` — exposed only when `WAVO_ALLOW_DELETE=true` (default `false`) |

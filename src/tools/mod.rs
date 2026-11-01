@@ -523,11 +523,10 @@ impl Tools {
 
         match self.plainsong.upload(&resolved, &full_title).await {
             Ok(track) => {
-                let url = self.plainsong.track_url(&track.id);
                 ctx.record_published(PublishedTrack {
                     id: track.id.clone(),
                     title: track.title.clone(),
-                    url: url.clone(),
+                    url: self.plainsong.track_url(&track.id),
                 })
                 .await;
                 tracing::info!(
@@ -539,7 +538,6 @@ impl Tools {
                 json!({
                     "ok": true,
                     "id": track.id,
-                    "track_url": url,
                     "size_bytes": track.size_bytes,
                 })
             }
