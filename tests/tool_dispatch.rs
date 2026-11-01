@@ -576,3 +576,38 @@ async fn a_search_without_a_query_or_a_storage_is_a_result_the_model_can_read() 
     assert_eq!(failed["error"], "I couldn't search the music storage.");
     assert!(h.ctx.found().await.is_empty());
 }
+
+#[tokio::test]
+async fn a_typo_is_linked_but_a_nearly_right_title_is_only_suggested() {
+    if !python3_available() {
+        return;
+    }
+    let h = harness(|_| {}, vec![(200, COLLECTION), (200, COLLECTION)]).await;
+
+    let typo = h
+        .tools
+        .call(&h.ctx, "find_track", json!({"query": "bohemain rapsody"}))
+        .await;
+    assert_eq!(typo["total"], 2);
+    assert_eq!(typo["similar"], json!([]));
+    assert_eq!(h.ctx.found().await.len(), 2);
+
+    let h = harness(|_| {}, vec![(200, COLLECTION)]).await;
+    let near = h
+        .tools
+        .call(
+            &h.ctx,
+            "find_track",
+            json!({"query": "queen bohemian rhapsody live aid"}),
+        )
+        .await;
+    assert_eq!(near["ok"], true);
+    assert_eq!(near["total"], 0);
+    assert_eq!(near["linked"], json!([]));
+    assert_eq!(near["similar"].as_array().unwrap().len(), 2);
+    assert!(
+        !near.to_string().contains("track.html"),
+        "the model was handed an address: {near}"
+    );
+    assert!(h.ctx.found().await.is_empty(), "a suggestion got a link");
+}

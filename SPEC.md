@@ -350,8 +350,10 @@ It states:
 - The rule that audio is produced with demix tools and published with `publish_track`;
   the model never invents URLs or claims a track was published.
 - A request to find a song or for its link, with no change to the audio, goes to
-  `find_track`, not to demix. When nothing matches, the model tries the title alone once,
-  then says so and offers to fetch the song; it fetches nothing until the user agrees.
+  `find_track`, with the user's own words and nothing added. A title in `similar` that is
+  plainly the song is searched again as written, which links it; otherwise the model tries
+  the title alone once, then says so and offers to fetch the song; it fetches nothing until
+  the user agrees.
 - How to pick the source: a YouTube link in the message goes into `process_audio`'s
   `url` verbatim (never shortened, re-encoded or turned into a search, and never sent
   through `search_youtube`, which is for titles); a song named in words goes into
@@ -412,13 +414,23 @@ description, parameters}}`. Two adjustments are applied by wavo before exposing 
 | --- | --- | --- |
 | `publish_track` | `path` (string, from a `process_audio` result), `artist`, `title`, `modification` (strings, joined by wavo — see §7) | `{id, track_url, size_bytes}` |
 | `list_tracks` | `q` (optional string) | Up to 10 `{id, title, track_url}` |
-| `find_track` | `query` (string) | `{total, linked}`: how many tracks match and the titles of up to 10, newest first. No URLs: wavo puts those tracks in the links block (§5.4) |
+| `find_track` | `query` (string) | `{total, linked, similar}`: how many tracks match, the titles of up to 10, newest first, and when nothing matches up to 5 nearest titles. No URLs: wavo puts the `linked` tracks in the links block (§5.4); `similar` tracks get no link |
 | `delete_track` | `id` (string) | `{ok}` — exposed only when `WAVO_ALLOW_DELETE=true` (default `false`) |
 
 `find_track` does not use plainsong's `q`, which matches one contiguous substring and
 would miss "Queen Bohemian Rhapsody" in "Queen — Bohemian Rhapsody (oryginał)". It lists
-the collection and matches on wavo's side: every query word must appear in a word of the
-title, ignoring case and diacritics.
+the collection and matches on wavo's side (`tools/search.rs`), ignoring case and
+diacritics, and stops at the first step that finds anything:
+
+1. Every query word appears in a word of the title.
+2. Every query word appears or nearly does: a typo (one edit, two from eight letters up, a
+   swap of neighbours counting as one), an inflected form (a shared start of 70% of the
+   longer word), or words written together. Words under four letters and a differing
+   first letter never count as near.
+3. Only part of the query does: at least two fifths of its letters, in the title before any
+   bracket, so that "(bez wokalu)" counts for nothing. These go to the model as `similar`
+   and are never linked, because a shared performer does not make it the same song. The
+   model decides, and a repeat search with the title as written produces the link.
 
 ### 6.4 Tool result handling
 

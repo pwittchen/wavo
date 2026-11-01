@@ -8,6 +8,7 @@
 
 pub mod plainsong;
 pub mod publish;
+pub mod search;
 pub mod youtube;
 
 use std::collections::HashMap;
@@ -207,14 +208,16 @@ impl Tools {
         catalogue.push(ToolDef::new(
             "find_track",
             "Find a song already in the music storage so the user gets its title and \
-             link. Words match in any order, ignoring case and diacritics. wavo appends \
-             the title and link of every match to your reply.",
+             link. Words match in any order, ignoring case and diacritics, and a typo, \
+             an inflected form or a fragment of a word still matches. wavo appends the \
+             title and link of every track in `linked` to your reply. When nothing \
+             matches, `similar` holds the nearest titles, which are not linked.",
             json!({
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Only the words of the performer and the song, as written, e.g. \"Queen Bohemian Rhapsody\". Every word must match."
+                        "description": "The user's own words for the performer and the song, e.g. \"Queen Bohemian Rhapsody\". Add nothing they did not say."
                     }
                 },
                 "required": ["query"]
@@ -585,9 +588,9 @@ impl Tools {
         };
 
         match self.plainsong.find(query).await {
-            Ok(tracks) => {
+            Ok(found) => {
                 let mut titles = Vec::new();
-                for track in tracks.iter().take(MAX_FOUND_TRACKS) {
+                for track in found.matches.iter().take(MAX_FOUND_TRACKS) {
                     ctx.record_found(PublishedTrack {
                         id: track.id.clone(),
                         title: track.title.clone(),
@@ -596,7 +599,17 @@ impl Tools {
                     .await;
                     titles.push(track.title.clone());
                 }
-                json!({"ok": true, "total": tracks.len(), "linked": titles})
+                let similar: Vec<&str> = found
+                    .similar
+                    .iter()
+                    .map(|track| track.title.as_str())
+                    .collect();
+                json!({
+                    "ok": true,
+                    "total": found.matches.len(),
+                    "linked": titles,
+                    "similar": similar,
+                })
             }
             Err(e) => {
                 tracing::warn!(error = %e, "searching tracks failed");
