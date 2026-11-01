@@ -121,6 +121,7 @@ async fn the_catalogue_hides_the_operator_only_tools_by_default() {
     assert!(names.contains(&"process_audio"));
     assert!(names.contains(&"publish_track"));
     assert!(names.contains(&"list_tracks"));
+    assert!(names.contains(&"find_track"));
     assert!(
         !names.contains(&"delete_track"),
         "delete_track is off by default"
@@ -466,4 +467,112 @@ async fn a_cancelled_turn_does_not_start_a_new_run() {
         .call(&h.ctx, "process_audio", json!({"search": "Queen"}))
         .await;
     assert_eq!(result["ok"], false);
+}
+
+const COLLECTION: &str = r#"[
+    {"id": "new", "title": "Queen — Bohemian Rhapsody (bez wokalu)"},
+    {"id": "other", "title": "Kult — Arahja (oryginał)"},
+    {"id": "old", "title": "Queen — Bohemian Rhapsody (oryginał)"}
+]"#;
+
+#[tokio::test]
+async fn finding_a_song_links_every_match_and_tells_the_model_only_the_titles() {
+    if !python3_available() {
+        return;
+    }
+    let h = harness(|_| {}, vec![(200, COLLECTION)]).await;
+
+    let result = h
+        .tools
+        .call(
+            &h.ctx,
+            "find_track",
+            json!({"query": "queen bohemian rhapsody"}),
+        )
+        .await;
+
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["total"], 2);
+    assert_eq!(
+        result["linked"],
+        json!([
+            "Queen — Bohemian Rhapsody (bez wokalu)",
+            "Queen — Bohemian Rhapsody (oryginał)"
+        ])
+    );
+    assert!(
+        !result.to_string().contains("track.html"),
+        "the model was handed an address: {result}"
+    );
+
+    // The whole list was asked for: plainsong's `q` cannot match across the dash.
+    assert_eq!(h._plainsong_stub.requests().await[0].path, "/api/tracks");
+
+    // Newest first, as plainsong lists them, and wavo holds the links.
+    let found = h.ctx.found().await;
+    assert_eq!(found.len(), 2);
+    assert_eq!(found[0].id, "new");
+    assert_eq!(found[0].url, "https://music.example.com/track.html?id=new");
+    assert!(h.ctx.published().await.is_empty());
+}
+
+#[tokio::test]
+async fn finding_nothing_is_an_answer_and_not_a_failure() {
+    if !python3_available() {
+        return;
+    }
+    let h = harness(|_| {}, vec![(200, COLLECTION)]).await;
+
+    let result = h
+        .tools
+        .call(&h.ctx, "find_track", json!({"query": "metallica"}))
+        .await;
+
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["total"], 0);
+    assert!(h.ctx.found().await.is_empty());
+}
+
+#[tokio::test]
+async fn a_broad_search_links_ten_tracks_and_says_how_many_there_are() {
+    if !python3_available() {
+        return;
+    }
+    let collection: Vec<_> = (0..12)
+        .map(|n| json!({"id": n.to_string(), "title": format!("Queen — Song {n}")}))
+        .collect();
+    let body = json!(collection).to_string();
+    let h = harness(|_| {}, vec![(200, body.as_str())]).await;
+
+    let result = h
+        .tools
+        .call(&h.ctx, "find_track", json!({"query": "queen"}))
+        .await;
+
+    assert_eq!(result["total"], 12);
+    assert_eq!(result["linked"].as_array().unwrap().len(), 10);
+    assert_eq!(h.ctx.found().await.len(), 10);
+}
+
+#[tokio::test]
+async fn a_search_without_a_query_or_a_storage_is_a_result_the_model_can_read() {
+    if !python3_available() {
+        return;
+    }
+    let h = harness(|_| {}, vec![(500, "boom")]).await;
+
+    let missing = h
+        .tools
+        .call(&h.ctx, "find_track", json!({"query": "  "}))
+        .await;
+    assert_eq!(missing["ok"], false);
+    assert_eq!(h._plainsong_stub.request_count().await, 0);
+
+    let failed = h
+        .tools
+        .call(&h.ctx, "find_track", json!({"query": "queen"}))
+        .await;
+    assert_eq!(failed["ok"], false);
+    assert_eq!(failed["error"], "I couldn't search the music storage.");
+    assert!(h.ctx.found().await.is_empty());
 }

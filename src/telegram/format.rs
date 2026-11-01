@@ -58,6 +58,7 @@ pub enum Msg {
     ErrTooLarge,
     ErrUnsupportedType,
     ErrPublishFailed,
+    ErrTrackSearchFailed,
     ErrPathRefused,
     ErrToolUnavailable,
     ErrIterationBudget,
@@ -70,7 +71,7 @@ pub enum Msg {
 
 impl Msg {
     /// Used by the table test; also keeps the list in one place.
-    pub const ALL: [Msg; 39] = [
+    pub const ALL: [Msg; 40] = [
         Msg::Help,
         Msg::TextOnly,
         Msg::Busy,
@@ -102,6 +103,7 @@ impl Msg {
         Msg::ErrTooLarge,
         Msg::ErrUnsupportedType,
         Msg::ErrPublishFailed,
+        Msg::ErrTrackSearchFailed,
         Msg::ErrPathRefused,
         Msg::ErrToolUnavailable,
         Msg::ErrIterationBudget,
@@ -123,7 +125,8 @@ pub fn t(msg: Msg, lang: Lang) -> &'static str {
             "• separate vocals from Queen - Bohemian Rhapsody\n",
             "• https://youtu.be/fJ9rUzIMcZQ — instrumental, please\n",
             "• slow down that song to 80%\n",
-            "• transpose it to A minor\n\n",
+            "• transpose it to A minor\n",
+            "• find me Bohemian Rhapsody and send the link\n\n",
             "Commands: /status /tracks /reset /cancel"
         ),
         (Msg::Help, Lang::Pl) => concat!(
@@ -133,7 +136,8 @@ pub fn t(msg: Msg, lang: Lang) -> &'static str {
             "• oddziel wokal od Queen - Bohemian Rhapsody\n",
             "• https://youtu.be/fJ9rUzIMcZQ — poproszę podkład\n",
             "• zwolnij ten utwór do 80%\n",
-            "• przetransponuj go do a-moll\n\n",
+            "• przetransponuj go do a-moll\n",
+            "• znajdź mi Bohemian Rhapsody i daj link\n\n",
             "Komendy: /status /tracks /reset /cancel"
         ),
 
@@ -252,6 +256,9 @@ pub fn t(msg: Msg, lang: Lang) -> &'static str {
         (Msg::ErrPublishFailed, Lang::Pl) => {
             "Nie udało mi się opublikować utworu w magazynie muzyki."
         }
+
+        (Msg::ErrTrackSearchFailed, Lang::En) => "I couldn't search the music storage.",
+        (Msg::ErrTrackSearchFailed, Lang::Pl) => "Nie udało mi się przeszukać magazynu muzyki.",
 
         (Msg::ErrPathRefused, Lang::En) => {
             "I can only publish files produced during this conversation."

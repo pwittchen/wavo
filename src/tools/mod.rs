@@ -1,5 +1,5 @@
 //! The dispatch table: demix's tools as discovered over MCP, plus wavo's own
-//! publish/list/delete tools, behind one interface the LLM loop can call.
+//! publish/list/find/delete tools, behind one interface the LLM loop can call.
 //!
 //! Everything the model is allowed to influence passes through here, so this is
 //! also where the two containment rules live: wavo picks the paths (§6.3), and
@@ -32,12 +32,16 @@ use crate::tools::plainsong::{is_audio_file, PlainsongClient};
 use crate::tools::publish::{compose_track_title, resolve_publish_path};
 use crate::tools::youtube::{is_youtube_url, SongNameLookup, YtDlp};
 
+/// The most tracks one `find_track` call links to.
+const MAX_FOUND_TRACKS: usize = 10;
+
 /// Everything one turn accumulates: the paths the model is allowed to name, the
-/// tracks it published, and the directories to clean up afterwards.
+/// tracks it published or found, and the directories to clean up afterwards.
 #[derive(Debug, Default)]
 struct TurnState {
     paths: HashMap<String, PathBuf>,
     published: Vec<PublishedTrack>,
+    found: Vec<PublishedTrack>,
     job_dirs: Vec<PathBuf>,
 }
 
@@ -76,6 +80,19 @@ impl TurnCtx {
     /// these, by wavo, never by the model (§5.4).
     pub async fn record_published(&self, track: PublishedTrack) {
         self.state.lock().await.published.push(track);
+    }
+
+    pub async fn found(&self) -> Vec<PublishedTrack> {
+        self.state.lock().await.found.clone()
+    }
+
+    /// Record a track `find_track` turned up, once however many searches reach
+    /// it. Its link goes out the same way a published one does (§5.4).
+    pub async fn record_found(&self, track: PublishedTrack) {
+        let found = &mut self.state.lock().await.found;
+        if !found.iter().any(|known| known.id == track.id) {
+            found.push(track);
+        }
     }
 
     pub async fn job_dirs(&self) -> Vec<PathBuf> {
@@ -184,6 +201,23 @@ impl Tools {
                 "properties": {
                     "q": {"type": "string", "description": "Optional case-insensitive search over titles."}
                 }
+            }),
+        ));
+
+        catalogue.push(ToolDef::new(
+            "find_track",
+            "Find a song already in the music storage so the user gets its title and \
+             link. Words match in any order, ignoring case and diacritics. wavo appends \
+             the title and link of every match to your reply.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Only the words of the performer and the song, as written, e.g. \"Queen Bohemian Rhapsody\". Every word must match."
+                    }
+                },
+                "required": ["query"]
             }),
         ));
 
@@ -538,6 +572,39 @@ impl Tools {
         }
     }
 
+    /// Look a song up for the user. The model gets the titles and no addresses:
+    /// the links reach the reply through the links block (§5.4).
+    async fn find_track(&self, ctx: &TurnCtx, arguments: &Value) -> Value {
+        let query = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|query| !query.is_empty());
+        let Some(query) = query else {
+            return error("`query` is required".to_string());
+        };
+
+        match self.plainsong.find(query).await {
+            Ok(tracks) => {
+                let mut titles = Vec::new();
+                for track in tracks.iter().take(MAX_FOUND_TRACKS) {
+                    ctx.record_found(PublishedTrack {
+                        id: track.id.clone(),
+                        title: track.title.clone(),
+                        url: self.plainsong.track_url(&track.id),
+                    })
+                    .await;
+                    titles.push(track.title.clone());
+                }
+                json!({"ok": true, "total": tracks.len(), "linked": titles})
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "searching tracks failed");
+                error(t(Msg::ErrTrackSearchFailed, ctx.lang))
+            }
+        }
+    }
+
     async fn delete_track(&self, ctx: &TurnCtx, arguments: &Value) -> Value {
         if !self.allow_delete {
             return error(t_name(Msg::ErrUnknownTool, ctx.lang, "delete_track"));
@@ -565,6 +632,7 @@ impl ToolBox for Tools {
         match name {
             "publish_track" => self.publish_track(ctx, &arguments).await,
             "list_tracks" => self.list_tracks(ctx, &arguments).await,
+            "find_track" => self.find_track(ctx, &arguments).await,
             "delete_track" => self.delete_track(ctx, &arguments).await,
             _ => {
                 let Some(object) = arguments.as_object().cloned() else {

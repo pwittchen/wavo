@@ -273,7 +273,7 @@ impl Bot {
         let ctx = TurnCtx::new(chat_id, turn_id, lang, cancel, progress.clone());
         let result = self.agent.run_turn(&ctx, history, &text).await;
 
-        let reply = compose_reply(&result.reply, &result.published);
+        let reply = compose_reply(&result.reply, &result.links());
 
         // Edit the acknowledgement into the answer when we can, so a turn leaves
         // one message behind rather than two.
@@ -298,6 +298,7 @@ impl Bot {
             tokens_in = result.tokens_in,
             tokens_out = result.tokens_out,
             published = result.published.len(),
+            found = result.found.len(),
             escalated = result.escalated,
             outcome = ?result.outcome,
             duration_ms = started.elapsed().as_millis() as u64,

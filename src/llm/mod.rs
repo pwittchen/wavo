@@ -33,12 +33,27 @@ pub struct TurnResult {
     pub reply: String,
     pub messages: Vec<ChatMessage>,
     pub published: Vec<PublishedTrack>,
+    /// Tracks already in the collection that this turn looked up for the user.
+    pub found: Vec<PublishedTrack>,
     pub outcome: Outcome,
     pub iterations: usize,
     pub tools_called: Vec<String>,
     pub tokens_in: u64,
     pub tokens_out: u64,
     pub escalated: bool,
+}
+
+impl TurnResult {
+    /// What the links block names: what was made, then what was found, each once.
+    pub fn links(&self) -> Vec<PublishedTrack> {
+        let mut links = self.published.clone();
+        for track in &self.found {
+            if !links.iter().any(|known| known.id == track.id) {
+                links.push(track.clone());
+            }
+        }
+        links
+    }
 }
 
 pub struct Agent {
@@ -299,6 +314,7 @@ impl Agent {
         escalated: bool,
     ) -> TurnResult {
         let published = ctx.published().await;
+        let found = ctx.found().await;
         let reply = if reply.trim().is_empty() {
             t(Msg::Done, ctx.lang).to_string()
         } else {
@@ -308,6 +324,7 @@ impl Agent {
             reply,
             messages,
             published,
+            found,
             outcome: Outcome::Answered,
             iterations,
             tools_called,
@@ -332,15 +349,17 @@ impl Agent {
         escalated: bool,
     ) -> TurnResult {
         let reply = t(message_for(outcome), ctx.lang).to_string();
+        // A cancelled turn publishes nothing, even if a tool already ran (§8.3).
+        let (published, found) = if outcome == Outcome::Cancelled {
+            (Vec::new(), Vec::new())
+        } else {
+            (ctx.published().await, ctx.found().await)
+        };
         TurnResult {
             reply,
             messages,
-            // A cancelled turn publishes nothing, even if a tool already ran (§8.3).
-            published: if outcome == Outcome::Cancelled {
-                Vec::new()
-            } else {
-                ctx.published().await
-            },
+            published,
+            found,
             outcome,
             iterations,
             tools_called,

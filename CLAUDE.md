@@ -53,8 +53,8 @@ Things that are not obvious from a single file:
 - **The tool catalogue is half discovered, half native.** demix's tools come
   from `tools/list` at startup and are converted by `mcp/schema.rs`; `cwd` and
   `output_dir` are stripped from the schema (`INJECTED_ARGS`) and injected by
-  wavo per call. `publish_track` / `list_tracks` / `delete_track` are built in
-  `Tools::new`. Adding a demix tool needs no wavo change.
+  wavo per call. `publish_track` / `list_tracks` / `find_track` / `delete_track`
+  are built in `Tools::new`. Adding a demix tool needs no wavo change.
 - **The model never names a filesystem path.** `TurnCtx` keeps a relative-key →
   absolute-path table filled from each demix result; `publish_track` and a
   `file` argument resolve through it and through `tools/publish.rs`, which
@@ -78,7 +78,8 @@ Things that are not obvious from a single file:
   environment rather than `DEMIX_YT_DLP_ARGS` on purpose: demix's stderr is read
   back into the log, and a command line would carry the password into it.
 - **wavo composes its own links.** Track and listing URLs are appended after the
-  model's text, so a hallucinated URL cannot reach a user.
+  model's text, so a hallucinated URL cannot reach a user. `find_track` works the
+  same way: the model gets titles, wavo appends the links.
 - **Bilingual strings are a lookup, not an i18n framework.** Every string wavo
   composes itself lives in `telegram/format.rs` keyed by `(Msg, Lang)`, and a
   test asserts every `Msg` in `Msg::ALL` has a Polish *and* an English variant

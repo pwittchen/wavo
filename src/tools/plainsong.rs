@@ -29,6 +29,16 @@ pub struct Track {
     pub size_bytes: u64,
 }
 
+impl Track {
+    /// Whether every word of a search appears in this track's title.
+    fn matches(&self, query_words: &[String]) -> bool {
+        let title_words = search_words(&self.title);
+        query_words
+            .iter()
+            .all(|query| title_words.iter().any(|word| word.contains(query.as_str())))
+    }
+}
+
 pub struct PlainsongClient {
     http: reqwest::Client,
     api_base: String,
@@ -87,6 +97,24 @@ impl PlainsongClient {
             .json::<Vec<Track>>()
             .await
             .map_err(|e| PlainsongError::Decode(e.to_string()))
+    }
+
+    /// The tracks a person would call a match for `query`, newest first.
+    ///
+    /// plainsong's own `q` is one contiguous substring, so "Queen Bohemian
+    /// Rhapsody" would miss "Queen — Bohemian Rhapsody (oryginał)" and "zolw" would
+    /// miss "żółw". The matching happens here instead, word by word over the
+    /// folded title. A query with no words in it matches nothing.
+    pub async fn find(&self, query: &str) -> Result<Vec<Track>, PlainsongError> {
+        let words = search_words(query);
+        if words.is_empty() {
+            return Ok(Vec::new());
+        }
+        let tracks = self.list(None).await?;
+        Ok(tracks
+            .into_iter()
+            .filter(|track| track.matches(&words))
+            .collect())
     }
 
     /// `POST /api/tracks` with the file and its title, retried once on a 5xx (§7).
@@ -297,6 +325,24 @@ fn slugify(title: &str) -> String {
     slug.trim_matches('_').to_string()
 }
 
+/// A text as the words a search compares: diacritics folded, lowercased, split on
+/// anything that is not a letter or a digit.
+fn search_words(text: &str) -> Vec<String> {
+    let mut folded = String::new();
+    for c in text.chars() {
+        match fold_char(c) {
+            Some(letters) => folded.push_str(letters),
+            None => folded.push(c),
+        }
+    }
+    folded
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Letters that keep their meaning as an ASCII letter. Polish first — that is
 /// what wavo's titles are full of — then the accented Latin letters a track title
 /// is otherwise likely to carry.
@@ -403,6 +449,38 @@ mod tests {
         assert_eq!(slug.chars().count(), MAX_SLUG_CHARS);
         // The whole name still fits comfortably inside a filesystem's limit.
         assert!(upload_filename(&"very long title ".repeat(50), "mp3").len() < 255);
+    }
+
+    fn track(title: &str) -> Track {
+        Track {
+            id: "1".into(),
+            title: title.into(),
+            filename: String::new(),
+            size_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn a_search_reads_words_in_any_order_past_punctuation_and_diacritics() {
+        let queen = track("Queen — Bohemian Rhapsody (bez wokalu)");
+        for query in [
+            "queen bohemian rhapsody",
+            "Bohemian Rhapsody Queen",
+            "bohemian",
+            "rhaps",
+            "queen bez wokalu",
+        ] {
+            assert!(queen.matches(&search_words(query)), "{query} missed");
+        }
+        assert!(track("Kult — Żółw (oryginał)").matches(&search_words("zolw oryginal")));
+        assert!(track("Kult — Zolw").matches(&search_words("Żółw")));
+    }
+
+    #[test]
+    fn a_search_needs_every_word_to_match() {
+        let queen = track("Queen — Bohemian Rhapsody (original)");
+        assert!(!queen.matches(&search_words("queen radio ga ga")));
+        assert!(!queen.matches(&search_words("metallica")));
     }
 
     #[test]

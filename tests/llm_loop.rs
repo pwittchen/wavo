@@ -240,18 +240,19 @@ async fn a_cancelled_turn_stops_and_publishes_nothing() {
     cancel.cancel();
     let ctx = ctx(cancel);
     // Something was published before the cancellation arrived; it is not reported.
-    ctx.record_published(PublishedTrack {
+    let track = PublishedTrack {
         id: "abc".into(),
         title: "Vocals".into(),
         url: "http://x/track.html?id=abc".into(),
-    })
-    .await;
+    };
+    ctx.record_published(track.clone()).await;
+    ctx.record_found(track).await;
 
     let agent = agent(&stub, Arc::new(ScriptedTools::new()), 8);
     let result = agent.run_turn(&ctx, vec![], "slow it down").await;
 
     assert_eq!(result.outcome, Outcome::Cancelled);
-    assert!(result.published.is_empty());
+    assert!(result.links().is_empty());
     assert_eq!(result.reply, t(Msg::ErrCancelled, Lang::En));
     assert_eq!(
         stub.request_count().await,
@@ -306,4 +307,31 @@ async fn a_provider_outage_is_retried_and_then_reported_in_the_users_language() 
         3,
         "two retries after the first failure"
     );
+}
+
+#[tokio::test]
+async fn a_track_found_during_a_turn_reaches_the_links_once() {
+    let stub = StubHttp::start(vec![(200, &text_response("Mam ją."))]).await;
+    let ctx = ctx(CancellationToken::new());
+    let published = PublishedTrack {
+        id: "made".into(),
+        title: "Made".into(),
+        url: "http://x/track.html?id=made".into(),
+    };
+    let found = PublishedTrack {
+        id: "old".into(),
+        title: "Old".into(),
+        url: "http://x/track.html?id=old".into(),
+    };
+    ctx.record_published(published.clone()).await;
+    ctx.record_found(published.clone()).await;
+    ctx.record_found(found.clone()).await;
+    ctx.record_found(found.clone()).await;
+
+    let agent = agent(&stub, Arc::new(ScriptedTools::new()), 8);
+    let result = agent.run_turn(&ctx, vec![], "znajdź Old").await;
+
+    assert_eq!(result.outcome, Outcome::Answered);
+    assert_eq!(result.links(), vec![published, found]);
+    assert_eq!(result.published.len(), 1);
 }

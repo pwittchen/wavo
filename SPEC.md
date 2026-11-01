@@ -221,6 +221,9 @@ strangers. An empty or unset value is a **startup failure**, not "allow everyone
 🎵 https://music.example.com/track.html?id=7f1c…
 ```
 
+- A song looked up in the collection with `find_track` is answered the same way: the
+  model says one short sentence, and wavo appends the title and link of each match, ten
+  at most.
 - Messages are truncated to Telegram's 4096-character limit, with demix logs never
   pasted verbatim — errors are summarized into one or two human sentences (§8.2).
 - Formatting uses `parse_mode=HTML` with escaping of all interpolated values; MarkdownV2
@@ -270,6 +273,8 @@ So a message that is only **half** a request is held for `WAVO_COALESCE_WINDOW_S
 
 - A request is whole when it names **what to work on** — a link, a song named in words,
   or the song already under discussion in this chat — **and says what to do with it**.
+- Asking for a song ("znajdź", "masz", "daj link", "find", "send the link") says what to
+  do with it, so a request that also names the song starts at once.
 - A message that is only a song title or only an instruction ("usuń wokal") is half a
   request and starts the window. A message that is only a link is half a request too,
   and is held by the rule below instead.
@@ -344,6 +349,9 @@ It states:
 - What wavo is and what the tools do, in two sentences.
 - The rule that audio is produced with demix tools and published with `publish_track`;
   the model never invents URLs or claims a track was published.
+- A request to find a song or for its link, with no change to the audio, goes to
+  `find_track`, not to demix. When nothing matches, the model tries the title alone once,
+  then says so and offers to fetch the song; it fetches nothing until the user agrees.
 - How to pick the source: a YouTube link in the message goes into `process_audio`'s
   `url` verbatim (never shortened, re-encoded or turned into a search, and never sent
   through `search_youtube`, which is for titles); a song named in words goes into
@@ -404,7 +412,13 @@ description, parameters}}`. Two adjustments are applied by wavo before exposing 
 | --- | --- | --- |
 | `publish_track` | `path` (string, from a `process_audio` result), `artist`, `title`, `modification` (strings, joined by wavo — see §7) | `{id, track_url, size_bytes}` |
 | `list_tracks` | `q` (optional string) | Up to 10 `{id, title, track_url}` |
+| `find_track` | `query` (string) | `{total, linked}`: how many tracks match and the titles of up to 10, newest first. No URLs: wavo puts those tracks in the links block (§5.4) |
 | `delete_track` | `id` (string) | `{ok}` — exposed only when `WAVO_ALLOW_DELETE=true` (default `false`) |
+
+`find_track` does not use plainsong's `q`, which matches one contiguous substring and
+would miss "Queen Bohemian Rhapsody" in "Queen — Bohemian Rhapsody (oryginał)". It lists
+the collection and matches on wavo's side: every query word must appear in a word of the
+title, ignoring case and diacritics.
 
 ### 6.4 Tool result handling
 

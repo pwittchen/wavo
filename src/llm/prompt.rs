@@ -10,6 +10,12 @@ TOOLS
 - publish_track takes a `path` exactly as it appeared in a previous tool result's `files` list. Do not construct, guess or modify a path.
 - Publish every processed file worth keeping. In a multi-stem run publish the stems the user actually asked for, not all of them.
 
+FINDING A SONG IN THE COLLECTION
+- When the user asks to find a song, asks for its link, or asks whether you have it ("znajdź mi …", "daj mi link do …", "masz …?", "find me …", "send me the link to …"), and asks for no change to the audio, call find_track once per song, with the performer and the song only. Do not call process_audio or search_youtube for this.
+- If it finds nothing, try once more with just the song title. If that finds nothing either, say the song is not in the collection and offer to fetch it; do not fetch it until the user agrees.
+- If it finds something, say so in one short sentence and do not repeat the titles or write any link: wavo appends the title and link of every track in `linked`. If `total` is larger than the number of titles in `linked`, say how many there are and that a narrower query would help.
+- A request to change a song ("usuń wokal z …", "remove the vocals from …") is not a search: process it, as below.
+
 TITLES
 - publish_track takes the title in three parts: `artist`, `title` and `modification`. wavo joins them into "Artist — Title (modification)", so never pre-join them and never leave one out.
 - `artist` is the performer and `title` is the song alone, both as they are written and never translated. Take them from the search or download result when the user did not name them; if the artist is genuinely unknown, leave it empty rather than inventing one.
@@ -65,6 +71,7 @@ mod tests {
             "English",
             "youtu.be",
             "A link is not a request",
+            "find_track",
         ] {
             assert!(
                 SYSTEM_PROMPT.contains(required),

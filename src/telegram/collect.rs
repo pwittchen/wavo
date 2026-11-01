@@ -252,6 +252,20 @@ const ACTION_WORDS: &[&str] = &[
     "gitarę",
     "pianino",
     "fortepian",
+    "znajdź",
+    "znajdz",
+    "znajdziesz",
+    "wyszukaj",
+    "poszukaj",
+    "szukaj",
+    "szukam",
+    "masz",
+    "podaj",
+    "wyślij",
+    "wyslij",
+    "link",
+    "linka",
+    "linku",
     "tak",
     "dawaj",
     "jasne",
@@ -297,6 +311,10 @@ const ACTION_WORDS: &[&str] = &[
     "ok",
     "go",
     "proceed",
+    "find",
+    "search",
+    "send",
+    "have",
 ];
 
 /// Words that carry no request of their own: politeness, articles, prepositions
@@ -348,7 +366,6 @@ const FILLER_WORDS: &[&str] = &[
     "kawałek",
     "nagranie",
     "plik",
-    "link",
     "tutaj",
     "tu",
     // English
@@ -404,6 +421,22 @@ mod tests {
         ] {
             assert!(is_complete(text, false), "{text} was held back");
         }
+    }
+
+    #[test]
+    fn asking_for_a_song_starts_at_once() {
+        for text in [
+            "znajdź mi Bohemian Rhapsody",
+            "daj mi link do Bohemian Rhapsody",
+            "masz Bohemian Rhapsody?",
+            "find me Bohemian Rhapsody",
+            "send me the link to Bohemian Rhapsody",
+        ] {
+            assert!(is_complete(text, false), "{text} was held back");
+        }
+        // Still half a request: nothing says which song.
+        assert!(!is_complete("znajdź mi piosenkę", false));
+        assert!(!is_complete("daj mi link", false));
     }
 
     #[test]

@@ -91,6 +91,12 @@ Anything that is not a command is a request for the model:
 | slow that song down to 80% | reuses the song from the conversation, `tempo=0.8` |
 | przetransponuj go do a-moll | `target_key=Am` |
 | cut 1:00 to 2:30 and give me the instrumental | `start`/`end` plus a 2-stem run |
+| znajdź mi Bohemian Rhapsody, daj link | searches the collection and sends each match's title and link, with no download |
+
+A search runs on wavo's side, so words match in any order and without Polish
+letters: *"kult zolw"* finds *Kult — Żółw (oryginał)*. If the song is not in the
+collection, wavo says so and offers to fetch it, and downloads nothing until you
+agree.
 
 A song can be named in words or handed over as a link. YouTube links in any of
 their usual shapes work — `youtube.com/watch?v=…`, `youtu.be/…`,
